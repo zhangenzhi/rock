@@ -276,9 +276,9 @@ class GitManager:
             print(f"切换到已存在的分支: {branch_name}")
             return self._run_command(["git", "checkout", branch_name]) is not None
         elif create_if_not_exists:
-            # When creating a new branch, it's better to create it from a known state, like 'main'
-            print(f"从 'main' 创建并切换到新分支: {branch_name}")
-            return self._run_command(["git", "checkout", "-b", branch_name, "main"]) is not None
+            # Creates the new branch from the current HEAD
+            print(f"正在创建并切换到新分支: {branch_name}")
+            return self._run_command(["git", "checkout", "-b", branch_name]) is not None
         return False
 
     def commit_and_push(self, file_paths, message):
@@ -707,7 +707,7 @@ if __name__ == "__main__":
         
         if i < total_runs - 1:
             print(f"\n--- 第 {i + 1} 轮结束。程序将休眠5分钟... ---")
-            time.sleep(30)
+            time.sleep(300)
     
     print(f"\n{'#'*10} 全部 {total_runs} 轮创作完成 {'#'*10}")
 

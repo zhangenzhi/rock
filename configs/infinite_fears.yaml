@@ -1,0 +1,9 @@
+# Gemini API Configuration
+# Get your API key from Google AI Studio: https://aistudio.google.com/
+gemini_api_key: "AIzaSyCuyn0PU-ZXvYI9T4U_PRgkLaPopd32fn8"
+
+# General Settings
+novel_file_name: "infinite_fears.txt"
+character_profiles_directory: "characters"
+story_arc_file: "story_arc.json"
+rewrite_cycles: 3
