@@ -137,7 +137,7 @@ REVIEW_PROMPT_TEMPLATE = """
 {chapter_text}
 ---
 
-请根据以上标准，输出一份简洁的、要点式的中文修改意见列表。
+请以客观、中立的第三方编辑身份，输出一份简洁的、要点式的中文修改意见列表。不要使用“我”或“我们”等第一人称代词。
 """
 
 REWRITE_PROMPT_TEMPLATE = """
@@ -201,7 +201,7 @@ POV_DECISION_PROMPT = """
 """
 
 PROFILE_UPDATE_PROMPT = """
-你是一位深刻的心理分析师。请更新角色“{character_name}”的侧写档案。主角的成长被严格限制在普通人范围内。
+你是一位深刻的心理分析师。请以客观、专业的口吻更新角色“{character_name}”的侧写档案。主角的成长被严格限制在普通人范围内。
 
 **核心任务:**
 1.  **分析当前行为:** 基于角色的旧档案和新章节内容，分析他/她的最新行为和心理变化。
@@ -219,7 +219,7 @@ PROFILE_UPDATE_PROMPT = """
 {new_chapter_content}
 [最新章节内容（从此角色视点）结束]
 
-请输出完整、更新后的角色“{character_name}”的Markdown格式侧写档案：
+请输出完整、更新后的角色“{character_name}”的Markdown格式侧写档案。
 """
 
 # --- Git操作模块 ---
@@ -279,7 +279,8 @@ class GitManager:
         if not branch: return
         print(f"\n--- 正在向分支 '{branch}' 提交并推送 ---")
         for file_path in file_paths:
-             self._run_command(["git", "add", file_path])
+             if os.path.exists(file_path):
+                self._run_command(["git", "add", file_path])
         self._run_command(["git", "commit", "-m", message])
         self._run_command(["git", "push", "--set-upstream", "origin", branch])
         print(f"成功将更改推送到 origin/{branch}")
@@ -289,7 +290,7 @@ class GitManager:
 def load_config():
     """加载YAML配置文件。如果文件不存在，则创建一个模板并退出。"""
     CONFIG_DIR = "configs"
-    CONFIG_FILE = os.path.join(CONFIG_DIR, "infinite_fear.yaml")
+    CONFIG_FILE = os.path.join(CONFIG_DIR, "book_names.yaml")
     
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
@@ -607,6 +608,10 @@ def main():
         arc_state["current_movie_arc"] = plan_new_arc(api_key)
         if not arc_state["current_movie_arc"]: return
         
+        # 剧本保存
+        save_arc_state(arc_state, config)
+        git.commit_and_push([config['story_arc_file']], f"Architect Plan: {arc_state['current_movie_arc']['movie_name']}")
+
         arc_state["current_movie_arc"]["day"] += 1
         new_content, pov_character_name = handle_movie_chapter(git, arc_state, "", config)
         chapter_subtitle = arc_state["current_movie_arc"]["daily_log"]["1"]["subtitle"]
@@ -631,8 +636,6 @@ def main():
     
     save_arc_state(arc_state, config)
     files_to_commit = [NOVEL_FILE, config['story_arc_file']]
-    if os.path.exists(PROFILES_DIR):
-        files_to_commit.extend([os.path.join(PROFILES_DIR, f) for f in os.listdir(PROFILES_DIR)])
     git.commit_and_push(files_to_commit, f"Chapter {next_chapter_number}: {chapter_subtitle}")
 
     if arc_state["current_location"] == "movie_world":
@@ -654,7 +657,7 @@ def main():
         updated_profile = call_gemini(profile_prompt, api_key)
         if updated_profile:
             with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
-            # No need to commit profile separately, as it's included in the main commit
+            git.commit_and_push([profile_path], f"Update profile for {pov_character_name}")
     
     print("切回 'setup' 分支准备下次运行。")
     git.switch_to_branch("setup")
@@ -672,7 +675,7 @@ if __name__ == "__main__":
         
         if i < total_runs - 1:
             print(f"\n--- 第 {i + 1} 轮结束。程序将休眠5分钟... ---")
-            time.sleep(300)
+            time.sleep(30)
     
     print(f"\n{'#'*10} 全部 {total_runs} 轮创作完成 {'#'*10}")
 
