@@ -46,7 +46,7 @@ def main():
     """主执行函数，负责管理整个创作循环。"""
     
     # --- 配置加载与初始化 ---
-    config = load_config()
+    config = load_config(cfg="infinite_fears.yaml")
     git = GitManager(".") 
 
     # --- 启动检查 (只在程序开始时执行一次) ---

@@ -353,12 +353,15 @@ class StoryManager:
         
         PROFILES_DIR = self.config['character_profiles_directory']
         if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
+        
+        # 重新加载状态和文本，以防上一次循环后有外部更改
+        self.arc_state = self._load_arc_state()
+        self.story_text = self._load_story_text()
 
         # --- 状态加载与摘要生成 ---
         summary_before = "无（这是故事的开篇）" if not self.story_text else call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=self.story_text), self.api_key)
         if not summary_before:
             print("生成事前摘要失败，本轮循环中止。")
-            self.git.switch_to_branch("setup")
             return
         if self.story_text: print(f"\n--- 生成的事前摘要 ---\n{summary_before}\n--------------------")
         
@@ -373,13 +376,10 @@ class StoryManager:
         # --- 结果处理与收尾 ---
         if not new_content or not pov_character_name:
             print("未能生成有效内容，本轮循环中止。")
-            self.git.switch_to_branch("setup")
             return
             
         print("\n--- 章节打磨完成 ---")
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         
-        print("切回 'setup' 分支准备下次运行。")
-        self.git.switch_to_branch("setup")
         print("\n本轮循环完成。")
 
