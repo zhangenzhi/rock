@@ -69,6 +69,22 @@ TOOL_CREATION_PROMPT = """
 }}
 """
 
+# === 新增：现实世界主线剧情 Prompts ===
+REAL_WORLD_GENERATION_PROMPT = """
+你是一位悬疑和都市传说小说家。主角刚刚从一个恐怖电影世界回归现实，带着新的经历和一件纪念品。
+现实世界是故事的真正主线。主角的回归并非结束，而是新谜团的开始。
+
+**背景资料:**
+1.  **主角当前状态:** {real_world_summary}
+2.  **主角携带的工具:** {protagonist_tools}
+
+**写作要求:**
+-   **核心任务:** 创作一章现实世界的主线剧情。这一章需要利用主角从上一个电影世界带回的工具或经历，揭示一个关于他自身或他所处现实的、更深层次的谜团，这个谜团可能与他**失业的背景或过去的经历**有关。
+-   **推动主线:** 剧情必须向前推进，为主角下一次进入电影世界寻找答案或工具提供动机。
+-   **风格:** 营造一种日常下的诡异与不安感。
+-   **格式:** 请直接创作正文，不要添加任何评论。
+"""
+
 # === 章节生成与打磨 (Chapter Generation & Polishing) Prompts ===
 
 # --- 初稿生成 ---
@@ -196,10 +212,14 @@ POV_DECISION_PROMPT = """
 
 PROFILE_UPDATE_PROMPT = """
 你是一位深刻的心理分析师。请更新角色“{character_name}”的侧写档案。主角的成长被严格限制在普通人范围内。
-请基于角色的旧档案和新章节内容，生成一份全新的档案，包含对以下几点的认知和评判：
-1.  对自己的看法（作为普通人的能力、动机、恐惧、目标）。
-2.  对其他关键角色的具体行为和事件的看法。
-3.  对当前所处环境和近期发生的关键事件的理解与评判。
+
+**核心任务:**
+1.  **分析当前行为:** 基于角色的旧档案和新章节内容，分析他/她的最新行为和心理变化。
+2.  **背景慢速揭示 (仅限主角):** 如果角色是主角，请寻找机会，通过他在电影世界中的内心思考（例如，他对某个事件的联想、他对自身处境的反思），**极其缓慢且隐晦地**补充一小部分关于他现实世界背景的细节（如他过去的职业、人际关系或导致他失业的原因）。**切记：速度必须非常慢**，每一次只透露一丁点信息，为现实世界的主线剧情保留足够的悬念。
+3.  **生成新档案:** 输出一份全新的档案，包含对以下几点的认知和评判：
+    * 对自己的看法（作为普通人的能力、动机、恐惧、目标）。
+    * 对其他关键角色的具体行为和事件的看法。
+    * 对当前所处环境和近期发生的关键事件的理解与评判。
 
 [旧的侧写档案内容开始]
 {existing_profile}
@@ -255,15 +275,6 @@ class GitManager:
         self._run_command(["git", "branch", "-D", branch_name], suppress_errors=True)
         self._run_command(["git", "push", "origin", "--delete", branch_name], suppress_errors=True)
 
-    def read_file_from_branch(self, branch_name, file_path):
-        print(f"正在从分支 '{branch_name}' 读取文件 '{file_path}'...")
-        content = self._run_command(["git", "show", f"{branch_name}:{file_path}"], suppress_errors=True)
-        if content is not None: return content
-        content_remote = self._run_command(["git", "show", f"origin/{branch_name}:{file_path}"], suppress_errors=True)
-        if content_remote is not None: return content_remote
-        print(f"警告：在本地和远程分支'{branch_name}'上都无法读取文件 '{file_path}'。")
-        return None
-
     def switch_to_branch(self, branch_name, create_if_not_exists=False):
         if self.get_current_branch() == branch_name: return True
         if self.branch_exists(branch_name):
@@ -288,22 +299,14 @@ def call_gemini(prompt):
     """调用 Gemini API 并获取生成的内容。"""
     print(f"\n--- 正在调用 Gemini 模型: gemini-2.5-flash-preview-05-20 ---")
     
-    # 注意：在Canvas环境中，API密钥将自动提供。本地测试时，请在此处填入您的密钥。
-    api_key = "AIzaSyCuyn0PU-ZXvYI9T4U_PRgkLaPopd32fn8" 
+    api_key = "" 
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
     
     headers = {'Content-Type': 'application/json'}
     
     payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "temperature": 0.8,
-            "topK": 1,
-            "topP": 1,
-            "maxOutputTokens": 8192,
-        },
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.8, "topK": 1, "topP": 1, "maxOutputTokens": 8192},
         "safetySettings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -322,27 +325,32 @@ def call_gemini(prompt):
             if "content" in candidate and "parts" in candidate["content"] and candidate["content"]["parts"]:
                 return candidate["content"]["parts"][0].get("text", "").strip()
         
-        print("错误：Gemini API响应格式不正确或内容为空。")
-        print("响应内容:", response_data)
+        print(f"错误：Gemini API响应格式不正确或内容为空。\n响应内容: {response_data}")
         return None
 
     except requests.exceptions.RequestException as e:
         print(f"错误：Gemini API 请求失败: {e}")
-        if e.response:
-            print(f"响应状态码: {e.response.status_code}")
-            print(f"响应内容: {e.response.text}")
+        if e.response: print(f"响应内容: {e.response.text}")
         return None
 
 
 def convert_name_to_branch(name):
     if not name or name == "旁白": return None
-    return "-".join([item[0] for item in pinyin(name, style=Style.NORMAL)])
+    # 将中文名转换为全小写的拼音，用-连接，更适合做文件名
+    return "-".join([item[0] for item in pinyin(name, style=Style.NORMAL)]).lower()
 
 def load_arc_state():
+    """读取或初始化故事世界状态"""
     if os.path.exists(ARC_STATE_FILE):
         with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return {"current_movie": None, "day": 0, "max_days": 0, "movie_plan": None, "protagonist_tools": []}
+    return {
+        "protagonist_name": "江浩", # 默认主角名
+        "protagonist_tools": [],
+        "current_location": "real_world",
+        "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
+        "current_movie_arc": None
+    }
 
 def save_arc_state(state):
     with open(ARC_STATE_FILE, 'w', encoding='utf-8') as f:
@@ -365,37 +373,45 @@ def prepare_for_new_story(git):
         shutil.rmtree(PROFILES_DIR)
     print("环境清理完成。")
 
-def plan_new_arc(arc_state):
+def plan_new_arc():
+    """规划一个新的电影世界（大章节）"""
     print("\n--- 正在规划新的电影世界 ---")
-    if arc_state["current_movie"]:
-        print(f"正在为电影《{arc_state['current_movie']}》生成纪念品工具...")
-        tool_json_str = call_gemini(TOOL_CREATION_PROMPT.format(movie_name=arc_state['current_movie']))
-        try:
-            new_tool = json.loads(tool_json_str)
-            arc_state["protagonist_tools"].append(new_tool)
-            print(f"获得新工具: {new_tool.get('tool_name')}")
-        except (json.JSONDecodeError, TypeError):
-            print(f"错误：无法解析工具JSON: {tool_json_str}")
-
+    
     new_movie = call_gemini(MOVIE_SELECTION_PROMPT)
     if not new_movie: return None
-    arc_state["current_movie"] = new_movie
-    print(f"已选择新电影: {new_movie}")
 
     duration = random.randint(10, 15)
-    movie_plan = call_gemini(MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie, duration=duration))
-    if not movie_plan: return None
-    arc_state["movie_plan"] = movie_plan
+    movie_plan_text = call_gemini(MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie, duration=duration))
+    if not movie_plan_text: return None
     
-    arc_state["day"] = 1
-    arc_state["max_days"] = duration
+    # 解析每日计划并存入结构化数据
+    daily_log = {}
+    for day in range(1, duration + 1):
+        daily_plan = extract_daily_plan(movie_plan_text, day)
+        daily_log[str(day)] = {
+            "subtitle": daily_plan["subtitle"],
+            "emotion": daily_plan["emotion"],
+            "summary": None,
+            "review_feedback": None
+        }
+
+    arc = {
+        "movie_name": new_movie,
+        "status": "active",
+        "day": 0, # 初始化为0，在handle_movie_chapter中+1
+        "max_days": duration,
+        "movie_plan": movie_plan_text, # 存储完整规划文本
+        "daily_log": daily_log
+    }
+    
     print(f"电影《{new_movie}》规划完成，需生存 {duration} 天。")
-    return arc_state
+    return arc
 
 def extract_daily_plan(movie_plan, day):
     """从电影规划文档中提取指定某一天的计划（副标题和情绪锚点）。"""
     try:
-        pattern = re.compile(rf"第\s*{day}\s*天:\s*(.*?)\n.*?情绪锚点:\s*(.*?)(?:\n|\Z)", re.DOTALL)
+        # 修正正则表达式以匹配方括号
+        pattern = re.compile(rf"第\s*{day}\s*天:\s*\[(.*?)\]\n.*?情绪锚点:\s*(.*?)(?:\n|\Z)", re.DOTALL)
         match = pattern.search(movie_plan)
         if match:
             subtitle = match.group(1).strip()
@@ -404,6 +420,113 @@ def extract_daily_plan(movie_plan, day):
     except Exception as e:
         print(f"解析每日计划时出错: {e}")
     return {"subtitle": "未知的发展", "emotion": "悬疑"}
+
+def handle_movie_chapter(git, arc_state, story_text):
+    """处理电影世界中的一个章节"""
+    movie_arc = arc_state["current_movie_arc"]
+    day = movie_arc["day"]
+    daily_log_entry = movie_arc["daily_log"][str(day)]
+    
+    chapter_subtitle = daily_log_entry["subtitle"]
+    emotional_anchor = daily_log_entry["emotion"]
+    print(f"\n--- 本章主题 (副标题): {chapter_subtitle} ---")
+    print(f"--- 核心情绪锚点: {emotional_anchor} ---")
+
+    summary = "无（这是电影世界的第一章）" if day == 1 else call_gemini(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
+    if not summary: return None, None
+    if story_text: print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
+
+    # 更新状态文件中的摘要
+    daily_log_entry["summary"] = summary
+
+    if day == 1: # 电影世界的第一天
+        generation_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
+            movie_plan=movie_arc['movie_plan'], movie_name=movie_arc['movie_name'],
+            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
+        )
+        pov_character_name = arc_state["protagonist_name"]
+        all_profiles_text = "无"
+    else: # 电影世界后续天数
+        character_names_str = call_gemini(CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary))
+        all_profiles_text = "本章没有特定角色的侧写信息。"
+        if character_names_str and character_names_str.lower() != "无":
+            character_names = [name.strip() for name in character_names_str.split(',') if name.strip()]
+            print(f"识别到出场人物: {character_names}")
+            profile_contents = []
+            for name in character_names:
+                profile_path = os.path.join(PROFILES_DIR, f"{convert_name_to_branch(name)}_profile.md")
+                if os.path.exists(profile_path):
+                    with open(profile_path, 'r', encoding='utf-8') as f:
+                        profile_contents.append(f"--- 角色: {name} ---\n{f.read()}\n")
+            if profile_contents: all_profiles_text = "\n".join(profile_contents)
+        
+        pov_character_name = call_gemini(POV_DECISION_PROMPT.format(summary_text=summary))
+        if not pov_character_name: return None, None
+        print(f"\n--- AI编辑决定下一章视点为: {pov_character_name} ---")
+
+        generation_prompt = GENERATION_PROMPT_TEMPLATE.format(
+            movie_plan=movie_arc['movie_plan'], character_pov=pov_character_name, 
+            summary_text=summary, character_profiles_text=all_profiles_text,
+            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor,
+            protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False)
+        )
+
+    draft_content = call_gemini(generation_prompt)
+    if not draft_content: return None, None
+
+    # --- 三轮审稿与重写循环 ---
+    print("\n--- 开始三轮审稿与重写流程 ---")
+    polished_content = draft_content
+    final_feedback = ""
+    for i in range(REWRITE_CYCLES):
+        print(f"\n--- 第 {i + 1} / {REWRITE_CYCLES} 轮打磨 ---")
+        review_prompt = REVIEW_PROMPT_TEMPLATE.format(
+            chapter_text=polished_content, movie_plan=movie_arc['movie_plan'],
+            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
+        )
+        feedback = call_gemini(review_prompt)
+        if not feedback: 
+            print("审稿失败，跳过本轮重写。")
+            continue
+        
+        print(f"--- 编辑反馈 ---\n{feedback}\n----------------")
+        final_feedback = feedback # 保存最后一轮的反馈
+
+        rewrite_prompt = REWRITE_PROMPT_TEMPLATE.format(
+            movie_plan=movie_arc['movie_plan'], summary_text=summary,
+            character_profiles_text=all_profiles_text,
+            protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False),
+            character_pov=pov_character_name, original_text=polished_content,
+            feedback=feedback, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
+        )
+        rewritten_content = call_gemini(rewrite_prompt)
+        if not rewritten_content:
+            print("重写失败，保留上一版本内容。")
+            break
+        polished_content = rewritten_content
+    
+    # 更新状态文件中的最终简评
+    daily_log_entry["review_feedback"] = final_feedback
+    
+    return polished_content, pov_character_name
+
+
+def handle_real_world_chapter(git, arc_state, story_text):
+    """处理现实世界中的一个章节"""
+    print("\n--- 开始创作现实世界主线剧情 ---")
+    summary = call_gemini(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
+    if not summary: return None, None
+    arc_state["real_world_summary"] = summary
+    
+    generation_prompt = REAL_WORLD_GENERATION_PROMPT.format(
+        real_world_summary=summary,
+        protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False)
+    )
+    
+    new_content = call_gemini(generation_prompt)
+    pov_character_name = arc_state["protagonist_name"] # 现实世界总是主角视角
+    
+    return new_content, pov_character_name
 
 def main():
     import random
@@ -417,7 +540,6 @@ def main():
 
     if not git.branch_exists("main"):
         prepare_for_new_story(git)
-        print("\n正在创建 'main' 分支用于存放故事...")
         if not git.switch_to_branch("main", create_if_not_exists=True): return
     else:
         if not git.switch_to_branch("main"): return
@@ -425,137 +547,107 @@ def main():
     if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
 
     arc_state = load_arc_state()
-    if not arc_state.get("current_movie") or arc_state["day"] >= arc_state["max_days"]:
-        arc_state = plan_new_arc(arc_state)
-        if not arc_state: return
-    else:
-        arc_state["day"] += 1
-    save_arc_state(arc_state)
-    print(f"\n--- 当前电影:《{arc_state['current_movie']}》 | 第 {arc_state['day']} / {arc_state['max_days']} 天 ---")
-
     story_text = ""
     if os.path.exists(NOVEL_FILE):
         with open(NOVEL_FILE, "r", encoding="utf-8") as f: story_text = f.read()
     
-    # --- 故事生成与打磨 ---
-    summary = "无（这是故事的开篇）" if not story_text else call_gemini(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
-    if not summary: return
-    if story_text: print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
+    new_content = None
+    pov_character_name = None
+    chapter_subtitle = "现实的谜团" # 默认现实世界副标题
 
-    daily_plan = extract_daily_plan(arc_state['movie_plan'], arc_state['day'])
-    chapter_subtitle = daily_plan['subtitle']
-    emotional_anchor = daily_plan['emotion']
-    print(f"\n--- 本章主题 (副标题): {chapter_subtitle} ---")
-    print(f"--- 核心情绪锚点: {emotional_anchor} ---")
-    
-    if not story_text:
-        generation_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
-            movie_plan=arc_state['movie_plan'], movie_name=arc_state['current_movie'],
-            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
-        )
-        pov_character_name = "主角"
-        all_profiles_text = "无"
-    else:
-        character_names_str = call_gemini(CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary))
-        all_profiles_text = "本章没有特定角色的侧写信息。"
-        if character_names_str and character_names_str.lower() != "无":
-            character_names = [name.strip() for name in character_names_str.split(',') if name.strip()]
-            print(f"识别到出场人物: {character_names}")
-            profile_contents = []
-            for name in character_names:
-                branch_name = convert_name_to_branch(name)
-                if branch_name and git.branch_exists(branch_name):
-                    profile_path = os.path.join(PROFILES_DIR, f"{branch_name}_profile.md").replace("\\", "/")
-                    content = git.read_file_from_branch(branch_name, profile_path)
-                    if content: profile_contents.append(f"--- 角色: {name} ---\n{content}\n")
-            if profile_contents: all_profiles_text = "\n".join(profile_contents)
+    # --- 状态机：决定是写电影章节还是现实章节 ---
+    if arc_state["current_location"] == "movie_world":
+        movie_arc = arc_state["current_movie_arc"]
+        if movie_arc["day"] >= movie_arc["max_days"]:
+            # 电影结束，回归现实
+            print(f"电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
+            arc_state["current_location"] = "real_world"
+            movie_arc["status"] = "completed"
+            # 为上一个世界生成纪念品
+            if movie_arc["movie_name"]:
+                print(f"正在为电影《{movie_arc['movie_name']}》生成纪念品工具...")
+                tool_json_str = call_gemini(TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']))
+                try:
+                    new_tool = json.loads(tool_json_str)
+                    arc_state["protagonist_tools"].append(new_tool)
+                    print(f"获得新工具: {new_tool.get('tool_name')}")
+                except (json.JSONDecodeError, TypeError):
+                    print(f"错误：无法解析工具JSON: {tool_json_str}")
+            
+            new_content, pov_character_name = handle_real_world_chapter(git, arc_state, story_text)
+        else:
+            # 继续电影
+            movie_arc["day"] += 1
+            print(f"\n--- 当前电影:《{movie_arc['movie_name']}》 | 第 {movie_arc['day']} / {movie_arc['max_days']} 天 ---")
+            new_content, pov_character_name = handle_movie_chapter(git, arc_state, story_text)
+            chapter_subtitle = arc_state["current_movie_arc"]["daily_log"][str(movie_arc["day"])]["subtitle"]
+
+    elif arc_state["current_location"] == "real_world":
+        # 现实剧情结束，进入新电影
+        print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
+        arc_state["current_location"] = "movie_world"
+        arc_state["current_movie_arc"] = plan_new_arc()
+        if not arc_state["current_movie_arc"]: return
         
-        pov_character_name = call_gemini(POV_DECISION_PROMPT.format(summary_text=summary))
-        if not pov_character_name: return
-        print(f"\n--- AI编辑决定下一章视点为: {pov_character_name} ---")
+        # 直接开始写新电影的第一天
+        arc_state["current_movie_arc"]["day"] += 1 # day from 0 to 1
+        new_content, pov_character_name = handle_movie_chapter(git, arc_state, "") # 新电影，story_text为空
+        chapter_subtitle = arc_state["current_movie_arc"]["daily_log"]["1"]["subtitle"]
 
-        generation_prompt = GENERATION_PROMPT_TEMPLATE.format(
-            movie_plan=arc_state['movie_plan'], character_pov=pov_character_name, 
-            summary_text=summary, character_profiles_text=all_profiles_text,
-            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor,
-            protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False)
-        )
-    
-    draft_content = call_gemini(generation_prompt)
-    if not draft_content: return
-    
-    # --- 三轮审稿与重写循环 ---
-    print("\n--- 开始三轮审稿与重写流程 ---")
-    polished_content = draft_content
-    for i in range(REWRITE_CYCLES):
-        print(f"\n--- 第 {i + 1} / {REWRITE_CYCLES} 轮打磨 ---")
-        review_prompt = REVIEW_PROMPT_TEMPLATE.format(
-            chapter_text=polished_content, movie_plan=arc_state['movie_plan'],
-            chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
-        )
-        feedback = call_gemini(review_prompt)
-        if not feedback: 
-            print("审稿失败，跳过本轮重写。")
-            continue
+    if not new_content or not pov_character_name:
+        print("未能生成有效内容，本轮循环中止。")
+        git.switch_to_branch("setup")
+        return
         
-        print(f"--- 编辑反馈 ---\n{feedback}\n----------------")
-
-        rewrite_prompt = REWRITE_PROMPT_TEMPLATE.format(
-            movie_plan=arc_state['movie_plan'], summary_text=summary,
-            character_profiles_text=all_profiles_text,
-            protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False),
-            character_pov=pov_character_name, original_text=polished_content,
-            feedback=feedback, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
-        )
-        rewritten_content = call_gemini(rewrite_prompt)
-        if not rewritten_content:
-            print("重写失败，保留上一版本内容。")
-            break
-        polished_content = rewritten_content
-    
-    new_content = polished_content
     print("\n--- 章节打磨完成 ---")
 
     # --- 文件写入与提交 ---
     next_chapter_number = len(re.findall(r"第 (\d+) 章", story_text)) + 1
-    header = f"第 {next_chapter_number} 章: {chapter_subtitle} (视点: {pov_character_name}) | {arc_state['current_movie']} - 第 {arc_state['day']} 天\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    location_tag = arc_state["current_movie_arc"]["movie_name"] + f" - 第 {arc_state['current_movie_arc']['day']} 天" if arc_state["current_location"] == "movie_world" else "现实世界"
+    header = f"第 {next_chapter_number} 章: {chapter_subtitle} (视点: {pov_character_name}) | {location_tag}\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
-    write_mode = "w" if next_chapter_number == 1 else "a"
+    write_mode = "a" if os.path.exists(NOVEL_FILE) and story_text else "w"
     if write_mode == "a":
         with open(NOVEL_FILE, "a", encoding="utf-8") as f: f.write("\n" + "="*20 + "\n\n")
-
+    
     with open(NOVEL_FILE, write_mode, encoding="utf-8") as f:
         f.write(header + new_content + "\n\n")
     
-    git.commit_and_push([NOVEL_FILE, ARC_STATE_FILE], f"Chapter {next_chapter_number}: {chapter_subtitle}")
+    save_arc_state(arc_state)
+    # 提交所有可能被修改的文件
+    files_to_commit = [NOVEL_FILE, ARC_STATE_FILE]
+    if os.path.exists(PROFILES_DIR):
+        files_to_commit.extend([os.path.join(PROFILES_DIR, f) for f in os.listdir(PROFILES_DIR)])
+    git.commit_and_push(files_to_commit, f"Chapter {next_chapter_number}: {chapter_subtitle}")
 
-    # --- 角色侧写更新 ---
-    character_branch = convert_name_to_branch(pov_character_name)
-    if not character_branch:
-        git.switch_to_branch("setup")
-        return
+    # --- 角色侧写更新 (只在电影世界中进行) ---
+    if arc_state["current_location"] == "movie_world":
+        # 修复：确保文件名是拼音
+        profile_filename = f"{convert_name_to_branch(pov_character_name)}_profile.md"
+        profile_path = os.path.join(PROFILES_DIR, profile_filename)
+        existing_profile = ""
+        if os.path.exists(profile_path):
+            with open(profile_path, "r", encoding="utf-8") as f: existing_profile = f.read()
+        else:
+            existing_profile = f"# {pov_character_name} 的角色侧写\n\n- 在《{arc_state['current_movie_arc']['movie_name']}》篇章中首次出场。"
 
-    if not git.switch_to_branch(character_branch, create_if_not_exists=True):
-        git.switch_to_branch("setup")
-        return
-        
-    profile_path = os.path.join(PROFILES_DIR, f"{pov_character_name.lower()}_profile.md") # Use pov_character_name for profile path
-    existing_profile = ""
-    if os.path.exists(profile_path):
-        with open(profile_path, "r", encoding="utf-8") as f: existing_profile = f.read()
-    else:
-        existing_profile = f"# {pov_character_name} 的角色侧写\n\n- 在《{arc_state['current_movie']}》篇章中首次出场。"
+        # 确保pov_character_name是主角时，才触发背景揭示
+        is_protagonist = (pov_character_name == arc_state["protagonist_name"])
+        profile_prompt = PROFILE_UPDATE_PROMPT.format(
+            character_name=pov_character_name, existing_profile=existing_profile, new_chapter_content=new_content
+        )
+        # 仅当是主角时，才在prompt中强调背景揭示
+        if not is_protagonist:
+             profile_prompt = profile_prompt.replace("背景慢速揭示 (仅限主角):", "")
 
-    profile_prompt = PROFILE_UPDATE_PROMPT.format(
-        character_name=pov_character_name, existing_profile=existing_profile, new_chapter_content=new_content
-    )
-    updated_profile = call_gemini(profile_prompt)
 
-    if updated_profile:
-        with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
-        git.commit_and_push([profile_path], f"Update profile for {pov_character_name} after Chapter {next_chapter_number}")
+        updated_profile = call_gemini(profile_prompt)
+
+        if updated_profile:
+            with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
+            git.commit_and_push([profile_path], f"Update profile for {pov_character_name}")
     
-    print("侧写更新完成，切回 'setup' 分支准备下次运行。")
+    print("切回 'setup' 分支准备下次运行。")
     git.switch_to_branch("setup")
     print("\n本轮循环完成。")
 
