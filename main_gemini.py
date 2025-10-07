@@ -22,22 +22,25 @@ MOVIE_SELECTION_PROMPT = """
 
 MOVIE_ANALYSIS_PROMPT = """
 你是一位顶级的电影编剧和世界构建师。你将为小说的一个新篇章（大章节）做框架规划。
-主角是一名**普通人**，他将穿越到恐怖电影《{movie_name}》中，并在其中生存 {duration} 天。
+主角名叫**江浩**，是一名中国的**普通待业青年**，他将穿越到恐怖电影《{movie_name}》中。
 
-你的任务是输出一份**每日剧情大纲**，这份大纲将作为后续所有章节写作的蓝图。
+你的任务是输出一份**场景式剧情大纲**，这份大纲将作为后续所有章节写作的蓝图。
 
 **大纲必须包含以下部分:**
 1.  **整体设定:**
+    * **主角适配 (Protagonist Adaptation):** 你必须改编电影的核心情节，使其符合主角“江浩”的身份。请为他被卷入核心事件设计一个原创且合理的动机。
     * **恐怖内核分析:** 电影的核心恐怖来源是什么？
     * **场景氛围:** 描述这个世界的主要场景和整体氛围。
-    * **关键新人物:** 设计1-3名原创NPC，描述他们的姓名、性格及在剧情中的**具体作用**（例如：推动主线、情感担当、制造悬念等）。
-2.  **每日剧情大纲 (Day-by-Day Outline):**
-    * 请为从第1天到第{duration}天的**每一天**都进行规划。
-    * 每一天的规划格式必须如下:
-        **第 X 天: [当日副标题/核心事件]**
+    * **关键新人物:** 设计1-3名原创NPC，描述他们的姓名、性格及在剧情中的**具体作用**。
+    * **元叙事扭曲 (Meta-narrative Distortion):** 这是一个电影世界。请构思一种方式，让角色（尤其是主角）偶尔能感觉到一种被无形之手操纵的诡异感，仿佛他们是提线木偶，正在按照某个既定的剧本行动，从而增加一层超现实的心理恐怖。
+2.  **场景式剧情大纲 (Scene-by-Scene Outline):**
+    * 请为整个故事弧规划 10-15 个**场景（小节）**。
+    * 你可以自由分配场景，**允许在同一天内发生多个场景**（例如，白天和晚上），以控制慢节奏心理恐怖的节奏。
+    * 每一场景的规划格式必须如下:
+        **场景 X (第 Y 天 - 白天/晚上): [场景副标题/核心事件]**
         * **剧情梗概:** 简要描述今天会发生的主要事件。
-        * **角色视角:** 提示在这些事件中，关键角色（主角或NPC）可能会有的反应或视角。
-        * **情绪锚点:** 定义本章需要着重营造的核心情绪（例如：紧张、悬疑、短暂的安逸、绝望、搞笑、激动）。
+        * **角色视角:** 提示在这些事件中，关键角色可能会有的反应或视角。
+        * **情绪锚点:** 定义本章需要着重营造的核心情绪。
 
 这份规划文档将是AI写手创作每一章节的**唯一**剧本。请确保情节连贯，张力十足。
 """
@@ -79,7 +82,7 @@ REAL_WORLD_GENERATION_PROMPT = """
 
 # --- 初稿生成 ---
 FIRST_CHAPTER_PROMPT_TEMPLATE = """
-你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是根据**预设的剧本**，完成小说中第一天的故事章节。主角是一名**普通人**。
+你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是根据**预设的剧本**，完成小说中第一个场景的故事章节。主角是一名**普通人**。
 
 **今日剧本 (必须严格遵守):**
 1.  **本章主题 (副标题):** "{chapter_subtitle}"
@@ -88,6 +91,7 @@ FIRST_CHAPTER_PROMPT_TEMPLATE = """
 
 **写作要求:**
 -   **核心任务：演绎剧本:** 你的写作必须完全服务于**今日剧本**。所有情节都必须围绕**副标题**展开，并且全力渲染出预设的**核心情绪锚点**。
+-   **演绎元叙事感:** 在写作中，请巧妙地融入一种诡异的“提线木偶”感。可以通过角色突然的、不合逻辑的冲动，或者对周围环境“不真实感”的瞬间察觉，来暗示他们可能正被一个看不见的力量或剧本所操控。
 -   **开篇情节:** 故事从主角在一个无聊的下午观看电影《{movie_name}》，然后意外穿越到这个电影世界中开始。
 -   **建立悬念与行动:** 让主角立即面临一个具体的、需要做出反应的小冲突或谜题，以此推动故事的第一个行动。
 -   **注入内心驱动力:** 通过简短的内心独白、疑问或瞬间的权衡，来揭示主角**为什么**会做出这个决定。
@@ -95,7 +99,7 @@ FIRST_CHAPTER_PROMPT_TEMPLATE = """
 """
 
 GENERATION_PROMPT_TEMPLATE = """
-你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是根据**预设的剧本**，完成小说中一天的故事章节。主角是一名**普通人**。
+你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是根据**预设的剧本**，完成小说中一个场景的故事章节。主角是一名**普通人**。
 
 **今日剧本 (必须严格遵守):**
 1.  **本章主题 (副标题):** "{chapter_subtitle}"
@@ -110,6 +114,7 @@ GENERATION_PROMPT_TEMPLATE = """
 
 **写作要求:**
 -   **核心任务：演绎剧本:** 你的写作必须完全服务于**今日剧本**。所有情节、发现和角色互动都必须围绕**副标题**展开，并且全力渲染出预设的**核心情绪锚点**。
+-   **演绎元叙事感:** 在写作中，请巧妙地融入一种诡异的“提线木偶”感。可以通过角色突然的、不合逻辑的冲动，或者对周围环境“不真实感”的瞬间察觉，来暗示他们可能正被一个看不见的力量或剧本所操控。
 -   **角色互动与功能:** 重点描写角色之间的互动。确保每个角色的行为和对话都符合他们在世界观设定中的**具体作用**。
 -   **注入内心驱动力:** 在描述角色的行动时，通过简短的内心独白、疑问或权衡，来揭示他们**为什么**会做出这个决定。
 -   **叙事视点:** 请严格根据以上背景资料，从角色“{character_pov}”的视点续写。
@@ -271,7 +276,9 @@ class GitManager:
             print(f"切换到已存在的分支: {branch_name}")
             return self._run_command(["git", "checkout", branch_name]) is not None
         elif create_if_not_exists:
-            return self._run_command(["git", "checkout", "-b", branch_name]) is not None
+            # When creating a new branch, it's better to create it from a known state, like 'main'
+            print(f"从 'main' 创建并切换到新分支: {branch_name}")
+            return self._run_command(["git", "checkout", "-b", branch_name, "main"]) is not None
         return False
 
     def commit_and_push(self, file_paths, message):
@@ -290,7 +297,7 @@ class GitManager:
 def load_config():
     """加载YAML配置文件。如果文件不存在，则创建一个模板并退出。"""
     CONFIG_DIR = "configs"
-    CONFIG_FILE = os.path.join(CONFIG_DIR, "book_names.yaml")
+    CONFIG_FILE = os.path.join(CONFIG_DIR, "infinite_fears.yaml")
     
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
@@ -402,67 +409,85 @@ def plan_new_arc(api_key):
     new_movie = call_gemini(MOVIE_SELECTION_PROMPT, api_key)
     if not new_movie: return None
 
-    duration = random.randint(10, 15)
-    movie_plan_text = call_gemini(MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie, duration=duration), api_key)
+    movie_plan_text = call_gemini(MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie, duration="10-15"), api_key)
     if not movie_plan_text: return None
     
-    # 解析每日计划并存入结构化数据
-    daily_log = {}
-    for day in range(1, duration + 1):
-        daily_plan = extract_daily_plan(movie_plan_text, day)
-        daily_log[str(day)] = {
-            "subtitle": daily_plan["subtitle"],
-            "emotion": daily_plan["emotion"],
-            "summary": None,
-            "review_feedback": None
-        }
+    scenes = extract_all_scene_plans(movie_plan_text)
+    if not scenes:
+        print("错误：无法从规划文档中解析出任何场景。")
+        return None
 
     arc = {
         "movie_name": new_movie,
         "status": "active",
-        "day": 0, # 初始化为0
-        "max_days": duration,
+        "current_scene_index": -1, # 初始化为-1, 循环开始时+1变为0
+        "total_scenes": len(scenes),
         "movie_plan": movie_plan_text, 
-        "daily_log": daily_log
+        "scenes": scenes
     }
     
-    print(f"电影《{new_movie}》规划完成，需生存 {duration} 天。")
+    print(f"电影《{new_movie}》规划完成，共 {len(scenes)} 个场景。")
     return arc
 
-def extract_daily_plan(movie_plan, day):
-    """从电影规划文档中提取指定某一天的计划（副标题和情绪锚点）。"""
+def extract_all_scene_plans(movie_plan_text):
+    """从电影规划文档中提取所有场景的计划。"""
+    scenes = []
     try:
-        pattern = re.compile(rf"第\s*{day}\s*天:\s*\[(.*?)\]\n.*?情绪锚点:\s*(.*?)(?:\n|\Z)", re.DOTALL)
-        match = pattern.search(movie_plan)
-        if match:
-            subtitle = match.group(1).strip()
-            emotion = match.group(2).strip()
-            return {"subtitle": subtitle, "emotion": emotion}
+        # 正则表达式，用于匹配每个场景块
+        pattern = re.compile(
+            r"场景\s*(\d+)\s*\(第\s*(\d+)\s*天(?: - (.*?))?\):\s*\[(.*?)\]\n"
+            r".*?剧情梗概:\s*(.*?)\n"
+            r".*?角色视角:\s*(.*?)\n"
+            r".*?情绪锚点:\s*(.*?)(?=\n\n|\Z)",
+            re.DOTALL
+        )
+        matches = pattern.findall(movie_plan_text)
+        
+        for match in matches:
+            scenes.append({
+                "scene_number": int(match[0]),
+                "day": int(match[1]),
+                "part_of_day": match[2].strip() if match[2] else "全天",
+                "subtitle": match[3].strip(),
+                "emotion": match[6].strip(),
+                "summary": None,
+                "review_feedback": None
+            })
     except Exception as e:
-        print(f"解析每日计划时出错: {e}")
-    return {"subtitle": "未知的发展", "emotion": "悬疑"}
+        print(f"解析场景计划时出错: {e}")
+    
+    return scenes
+
 
 def handle_movie_chapter(git, arc_state, story_text, config):
-    """处理电影世界中的一个章节"""
+    """处理电影世界中的一个场景章节"""
     api_key = config['gemini_api_key']
     PROFILES_DIR = config['character_profiles_directory']
     REWRITE_CYCLES = config['rewrite_cycles']
     movie_arc = arc_state["current_movie_arc"]
-    day = movie_arc["day"]
-    daily_log_entry = movie_arc["daily_log"][str(day)]
+    scene_index = movie_arc["current_scene_index"]
     
-    chapter_subtitle = daily_log_entry["subtitle"]
-    emotional_anchor = daily_log_entry["emotion"]
+    # 检查场景索引是否有效
+    if scene_index < 0 or scene_index >= len(movie_arc["scenes"]):
+        print(f"错误: 无效的场景索引 {scene_index}")
+        return None, None
+        
+    scene_plan = movie_arc["scenes"][scene_index]
+    
+    chapter_subtitle = scene_plan["subtitle"]
+    emotional_anchor = scene_plan["emotion"]
     print(f"\n--- 本章主题 (副标题): {chapter_subtitle} ---")
     print(f"--- 核心情绪锚点: {emotional_anchor} ---")
 
-    summary = "无（这是电影世界的第一章）" if day == 1 else call_gemini(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text), api_key)
+    # 只有在不是第一个场景时才生成摘要
+    is_first_scene = (scene_index == 0)
+    summary = "无（这是电影世界的第一个场景）" if is_first_scene else call_gemini(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text), api_key)
     if not summary: return None, None
-    if story_text: print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
+    if not is_first_scene: print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
 
-    daily_log_entry["summary"] = summary
+    scene_plan["summary"] = summary
 
-    if day == 1: 
+    if is_first_scene: 
         generation_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
             movie_plan=movie_arc['movie_plan'], movie_name=movie_arc['movie_name'],
             chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
@@ -526,9 +551,10 @@ def handle_movie_chapter(git, arc_state, story_text, config):
             break
         polished_content = rewritten_content
     
-    daily_log_entry["review_feedback"] = final_feedback
+    scene_plan["review_feedback"] = final_feedback
     
     return polished_content, pov_character_name
+
 
 def handle_real_world_chapter(git, arc_state, story_text, config):
     """处理现实世界中的一个章节"""
@@ -551,13 +577,12 @@ def handle_real_world_chapter(git, arc_state, story_text, config):
 def main():
     import random
     
-    # --- 配置加载 ---
     config = load_config()
     api_key = config['gemini_api_key']
     NOVEL_FILE = config['novel_file_name']
     PROFILES_DIR = config['character_profiles_directory']
     
-    git = GitManager(".") # REPO_PATH is always current dir
+    git = GitManager(".") 
 
     print("--- 正在进行启动检查 ---")
     if git.get_current_branch() != "setup":
@@ -583,7 +608,7 @@ def main():
 
     if arc_state["current_location"] == "movie_world":
         movie_arc = arc_state["current_movie_arc"]
-        if movie_arc["day"] >= movie_arc["max_days"]:
+        if movie_arc["current_scene_index"] >= movie_arc["total_scenes"] - 1:
             print(f"电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
             arc_state["current_location"] = "real_world"
             movie_arc["status"] = "completed"
@@ -598,23 +623,23 @@ def main():
                     print(f"错误：无法解析工具JSON: {tool_json_str}")
             new_content, pov_character_name = handle_real_world_chapter(git, arc_state, story_text, config)
         else:
-            movie_arc["day"] += 1
-            print(f"\n--- 当前电影:《{movie_arc['movie_name']}》 | 第 {movie_arc['day']} / {movie_arc['max_days']} 天 ---")
+            movie_arc["current_scene_index"] += 1
+            scene_plan = movie_arc["scenes"][movie_arc["current_scene_index"]]
+            print(f"\n--- 当前电影:《{movie_arc['movie_name']}》 | 场景 {scene_plan['scene_number']} (第 {scene_plan['day']} 天 - {scene_plan['part_of_day']}) ---")
             new_content, pov_character_name = handle_movie_chapter(git, arc_state, story_text, config)
-            chapter_subtitle = arc_state["current_movie_arc"]["daily_log"][str(movie_arc["day"])]["subtitle"]
+            chapter_subtitle = scene_plan["subtitle"]
     elif arc_state["current_location"] == "real_world":
         print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
         arc_state["current_location"] = "movie_world"
         arc_state["current_movie_arc"] = plan_new_arc(api_key)
         if not arc_state["current_movie_arc"]: return
         
-        # 剧本保存
         save_arc_state(arc_state, config)
         git.commit_and_push([config['story_arc_file']], f"Architect Plan: {arc_state['current_movie_arc']['movie_name']}")
 
-        arc_state["current_movie_arc"]["day"] += 1
+        arc_state["current_movie_arc"]["current_scene_index"] += 1
         new_content, pov_character_name = handle_movie_chapter(git, arc_state, "", config)
-        chapter_subtitle = arc_state["current_movie_arc"]["daily_log"]["1"]["subtitle"]
+        chapter_subtitle = arc_state["current_movie_arc"]["scenes"][0]["subtitle"]
 
     if not new_content or not pov_character_name:
         print("未能生成有效内容，本轮循环中止。")
@@ -624,8 +649,15 @@ def main():
     print("\n--- 章节打磨完成 ---")
 
     next_chapter_number = len(re.findall(r"第 (\d+) 章", story_text)) + 1
-    location_tag = arc_state["current_movie_arc"]["movie_name"] + f" - 第 {arc_state['current_movie_arc']['day']} 天" if arc_state["current_location"] == "movie_world" else "现实世界"
-    header = f"第 {next_chapter_number} 章: {chapter_subtitle} (视点: {pov_character_name}) | {location_tag}\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    
+    scene_info = ""
+    if arc_state["current_location"] == "movie_world":
+        scene = arc_state["current_movie_arc"]["scenes"][arc_state["current_movie_arc"]["current_scene_index"]]
+        scene_info = f"{arc_state['current_movie_arc']['movie_name']} - 第 {scene['day']} 天 ({scene['part_of_day']})"
+    else:
+        scene_info = "现实世界"
+
+    header = f"第 {next_chapter_number} 章: {chapter_subtitle} (视点: {pov_character_name}) | {scene_info}\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
     write_mode = "a" if os.path.exists(NOVEL_FILE) and story_text else "w"
     if write_mode == "a":
