@@ -1,5 +1,5 @@
 # Sensitive configuration files
-configs/infinite_fear.yaml
+configs
 
 # Python cache files
 *.pyc
