@@ -37,7 +37,7 @@ MOVIE_ANALYSIS_PROMPT = """
 1.  **恐怖内核分析:** 电影的核心恐怖来源是什么？（例如：心理压迫、血腥暴力、未知生物、绝望氛围等）
 2.  **场景氛围:** 描述这个世界的主要场景和整体的视觉、听觉氛围。
 3.  **故事特色:** 电影剧情的关键转折点和最有特色的情节点是什么？
-4.  **关键新人物:** 设计1-3名原创的关键NPC（可以是盟友或敌人），他们将与主角互动。描述他们的姓名、性格和在剧情中的作用。
+4.  **关键新人物:** 设计1-3名原创的关键NPC。描述他们的姓名、性格，并明确他们在剧情中的**具体作用**（例如：推动主线情节、作为主角的情感支柱、制造悬念和冲突等）。
 
 规划文档将作为AI写作后续所有章节的唯一世界观依据。请确保内容详尽且富有张力。
 """
@@ -61,20 +61,34 @@ TOOL_CREATION_PROMPT = """
 
 # === 章节生成与打磨 (Chapter Generation & Polishing) Prompts ===
 
+# --- 新增：副标题生成 ---
+SUBTITLE_GENERATION_PROMPT = """
+你是一位富有创意的文学编辑。请根据当前的世界观设定和最新的故事摘要，为即将到来的新章节构思一个简洁、有力且富有悬念的**副标题**。
+这个副标题将作为作者本章写作的核心主题。
+
+**世界观设定:**
+{movie_plan}
+
+**故事摘要:**
+{summary_text}
+
+请只返回一个中文副标题，不要添加任何引号或解释。
+"""
+
 # --- 初稿生成 ---
 FIRST_CHAPTER_PROMPT_TEMPLATE = """
 你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是创作小说的开篇第一章。主角是一名**普通人**，他的成长仅限于心智和技能，不会获得超能力。
 
 **背景资料:**
 1.  **当前电影世界观:** {movie_plan}
-2.  **主角携带的工具:** []
+2.  **本章主题 (副标题):** "{chapter_subtitle}"
+3.  **主角携带的工具:** []
 
 **写作要求:**
+-   **紧扣主题:** 你的写作必须紧紧围绕本章的副标题“{chapter_subtitle}”展开，确保所有情节和互动都服务于这个核心主题。
 -   **开篇情节:** 故事从主角在一个无聊的下午观看电影《{movie_name}》，然后意外穿越到这个电影世界中开始。
 -   **核心任务：建立悬念与行动:** 开篇章节不仅要描述穿越，还**必须**让主角立即面临一个具体的、需要做出反应的小冲突或谜题，以此推动故事的第一个行动。
--   **写作风格 (Show, Don't Tell):**
-    -   **注入内心驱动力:** 这是最重要的规则。在描述主角的行动时，必须通过简短的内心独白、疑问或瞬间的权衡，来揭示他/她**为什么**会做出这个决定。将客观观察与主观思考结合起来，让角色行为有明确的动机。
-    -   **叙事视角中立:** 请始终保持一个中立的、类似摄像机镜头的旁观者视角。只描述角色能看到、听到、感受到的客观事实，不要对角色的行为或内心进行直接的主观评判。
+-   **注入内心驱动力:** 在描述主角的行动时，必须通过简短的内心独白、疑问或瞬间的权衡，来揭示他/她**为什么**会做出这个决定。
 -   **格式:** 请直接开始创作正文，不要添加任何评论。
 
 小说的第一章正文由此开始：
@@ -86,14 +100,17 @@ GENERATION_PROMPT_TEMPLATE = """
 **背景资料:**
 1.  **当前电影世界观:** {movie_plan}
 2.  **故事摘要:** "{summary_text}"
-3.  **本章出场人物侧写:**
+3.  **本章主题 (副标题):** "{chapter_subtitle}"
+4.  **本章出场人物侧写:**
 {character_profiles_text}
-4.  **主角携带的工具:** {protagonist_tools}
+5.  **主角携带的工具:** {protagonist_tools}
 
 **写作要求:**
--   **核心任务：推动情节发展:** 这是最重要的规则。每一章都**必须**包含一个关键事件、一个改变局势的角色决定、或是一个揭示新信息的发现。绝不允许情节停滞。
--   **注入内心驱动力:** 在描述主角的行动时，必须通过简短的内心独白、疑问或瞬间的权衡，来揭示他/她**为什么**会做出这个决定。将客观观察与主观思考结合起来。
--   **叙事视点:** 请严格根据以上背景资料，从角色“{character_pov}”的视点（第一人称或有限第三人称）续写。
+-   **核心任务：紧扣主题:** 你的写作必须紧紧围绕本章的副标题“{chapter_subtitle}”展开，确保所有情节、发现和角色互动都服务于这个核心主题。
+-   **推动情节发展:** 每一章都**必须**包含一个关键事件、一个改变局势的角色决定、或是一个揭示新信息的发现。
+-   **角色互动与功能:** 重点描写角色之间的互动。确保每个角色的行为和对话都符合他们在世界观设定中的**具体作用**（如推动剧情、制造冲突、发展感情线等）。
+-   **注入内心驱动力:** 在描述主角的行动时，必须通过简短的内心独白、疑问或瞬间的权衡，来揭示他/她**为什么**会做出这个决定。
+-   **叙事视点:** 请严格根据以上背景资料，从角色“{character_pov}”的视点续写。
 -   **格式:** 请直接开始创作，不要重复摘要或添加任何评论。
 """
 
@@ -101,11 +118,19 @@ GENERATION_PROMPT_TEMPLATE = """
 REVIEW_PROMPT_TEMPLATE = """
 你是一位极其严苛的文学编辑。你的任务是审查以下小说章节的初稿，并提出尖锐、具体、可操作的修改意见。
 
+**世界观设定 (必须遵守):**
+---
+{movie_plan}
+---
+
+**本章主题 (必须紧扣):** "{chapter_subtitle}"
+
 **审查标准:**
-1.  **内容重复:** 是否有重复的句子、描述或感受？
-2.  **叙事空洞:** 描写是否具体？还是充满了模糊、空泛的形容？
+1.  **主题一致性:** 章节内容是否紧扣副标题？角色互动是否有效地服务于这个主题？
+2.  **世界观一致性:** 本章内容是否严格遵循了上述的世界观设定？（例如：恐怖内核、场景氛围、关键人物设定等）
 3.  **情节推进:** 故事的核心情节是否向前发展了？还是角色在原地踏步？是否像游戏流水账？
 4.  **思行平衡:** 角色的内心思考和外部行动是否平衡？能否通过行动看出思考，通过思考驱动行动？
+5.  **内容重复:** 是否有重复的句子、描述或感受？
 
 **章节初稿:**
 ---
@@ -122,10 +147,11 @@ REWRITE_PROMPT_TEMPLATE = """
 **原始背景资料 (不可更改):**
 1.  **当前电影世界观:** {movie_plan}
 2.  **故事摘要:** "{summary_text}"
-3.  **本章出场人物侧写:**
+3.  **本章主题 (副标题):** "{chapter_subtitle}"
+4.  **本章出场人物侧写:**
 {character_profiles_text}
-4.  **主角携带的工具:** {protagonist_tools}
-5.  **叙事视点:** {character_pov}
+5.  **主角携带的工具:** {protagonist_tools}
+6.  **叙事视点:** {character_pov}
 
 **章节初稿:**
 ---
@@ -367,27 +393,34 @@ def main():
     print(f"\n--- 当前电影:《{arc_state['current_movie']}》 | 第 {arc_state['day']} / {arc_state['max_days']} 天 ---")
 
     if not os.path.exists(NOVEL_FILE):
-        print(f"小说文件 '{NOVEL_FILE}' 未找到。开始新故事！")
-        generation_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
-            movie_plan=arc_state['movie_plan'], movie_name=arc_state['current_movie']
-        )
-        story_text = "" # 第一章没有前文
+        story_text = ""
     else:
         with open(NOVEL_FILE, "r", encoding="utf-8") as f: story_text = f.read()
     
     if not story_text.strip() and os.path.exists(NOVEL_FILE): return
 
     # --- 故事生成与打磨 ---
-    # 如果是新故事，直接使用第一章的Prompt；否则，走正常的续写流程
-    if not story_text:
-        draft_content = call_ollama(generation_prompt)
-        if not draft_content: return
-        pov_character_name = "主角" # 第一章默认为主角
-    else:
-        summary = call_ollama(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
-        if not summary: return
-        print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
+    summary = "无（这是故事的开篇）" if not story_text else call_ollama(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
+    if not summary: return
+    if story_text: print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
 
+    # --- 新增：生成章节副标题 ---
+    subtitle_prompt = SUBTITLE_GENERATION_PROMPT.format(movie_plan=arc_state['movie_plan'], summary_text=summary)
+    chapter_subtitle = call_ollama(subtitle_prompt)
+    if not chapter_subtitle:
+        print("警告：无法生成副标题，将使用通用标题。")
+        chapter_subtitle = "发展与未知"
+    print(f"\n--- 本章主题 (副标题): {chapter_subtitle} ---")
+    
+    if not story_text:
+        generation_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
+            movie_plan=arc_state['movie_plan'],
+            movie_name=arc_state['current_movie'],
+            chapter_subtitle=chapter_subtitle
+        )
+        pov_character_name = "主角"
+        all_profiles_text = "无"
+    else:
         character_names_str = call_ollama(CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary))
         all_profiles_text = "本章没有特定角色的侧写信息。"
         if character_names_str and character_names_str.lower() != "无":
@@ -409,17 +442,23 @@ def main():
         generation_prompt = GENERATION_PROMPT_TEMPLATE.format(
             movie_plan=arc_state['movie_plan'], character_pov=pov_character_name, 
             summary_text=summary, character_profiles_text=all_profiles_text,
+            chapter_subtitle=chapter_subtitle,
             protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False)
         )
-        draft_content = call_ollama(generation_prompt)
-        if not draft_content: return
+    
+    draft_content = call_ollama(generation_prompt)
+    if not draft_content: return
     
     # --- 三轮审稿与重写循环 ---
     print("\n--- 开始三轮审稿与重写流程 ---")
     polished_content = draft_content
     for i in range(REWRITE_CYCLES):
         print(f"\n--- 第 {i + 1} / {REWRITE_CYCLES} 轮打磨 ---")
-        review_prompt = REVIEW_PROMPT_TEMPLATE.format(chapter_text=polished_content)
+        review_prompt = REVIEW_PROMPT_TEMPLATE.format(
+            chapter_text=polished_content,
+            movie_plan=arc_state['movie_plan'],
+            chapter_subtitle=chapter_subtitle
+        )
         feedback = call_ollama(review_prompt)
         if not feedback: 
             print("审稿失败，跳过本轮重写。")
@@ -429,24 +468,26 @@ def main():
 
         rewrite_prompt = REWRITE_PROMPT_TEMPLATE.format(
             movie_plan=arc_state['movie_plan'],
-            summary_text=summary if 'summary' in locals() else "无", # 确保summary存在
-            character_profiles_text=all_profiles_text if 'all_profiles_text' in locals() else "无",
+            summary_text=summary,
+            character_profiles_text=all_profiles_text,
             protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False),
             character_pov=pov_character_name,
             original_text=polished_content,
-            feedback=feedback
+            feedback=feedback,
+            chapter_subtitle=chapter_subtitle
         )
-        polished_content = call_ollama(rewrite_prompt)
-        if not polished_content:
+        rewritten_content = call_ollama(rewrite_prompt)
+        if not rewritten_content:
             print("重写失败，保留上一版本内容。")
-            break # 如果重写失败，则终止循环
+            break
+        polished_content = rewritten_content
     
     new_content = polished_content
     print("\n--- 章节打磨完成 ---")
 
     # --- 文件写入与提交 ---
     next_chapter_number = len(re.findall(r"第 (\d+) 章", story_text)) + 1
-    header = f"第 {next_chapter_number} 章 (视点: {pov_character_name}) | {arc_state['current_movie']} - 第 {arc_state['day']} 天\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    header = f"第 {next_chapter_number} 章: {chapter_subtitle} (视点: {pov_character_name}) | {arc_state['current_movie']} - 第 {arc_state['day']} 天\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
     write_mode = "w" if next_chapter_number == 1 else "a"
     if write_mode == "a":
@@ -455,7 +496,7 @@ def main():
     with open(NOVEL_FILE, write_mode, encoding="utf-8") as f:
         f.write(header + new_content + "\n\n")
     
-    git.commit_and_push([NOVEL_FILE, ARC_STATE_FILE], f"Chapter {next_chapter_number} in {arc_state['current_movie']} (Day {arc_state['day']})")
+    git.commit_and_push([NOVEL_FILE, ARC_STATE_FILE], f"Chapter {next_chapter_number}: {chapter_subtitle}")
 
     # --- 角色侧写更新 ---
     character_branch = convert_name_to_branch(pov_character_name)
