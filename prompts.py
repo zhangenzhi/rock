@@ -47,9 +47,6 @@ MOVIE_ANALYSIS_PROMPT = """
 * **情绪锚点:** (定义核心情绪)
 
 (继续规划直到 10-15 个场景结束)
-
----
-**重要提示：请确保你完成了所有 10-15 个场景的规划，这是一个强制性要求。输出必须完整。**
 """
 
 TOOL_CREATION_PROMPT = """
@@ -86,7 +83,6 @@ REAL_WORLD_GENERATION_PROMPT = """
 """
 
 # === 章节生成与打磨 Prompts ===
-
 FIRST_CHAPTER_PROMPT_TEMPLATE = """
 你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是根据**预设的剧本**，完成小说中第一个场景的故事章节。主角是一名**普通人**。
 
@@ -227,7 +223,7 @@ PROFILE_UPDATE_PROMPT = """
 
 [最新章节内容（从此角色视点）开始]
 {new_chapter_content}
-[最新章节内容（从此角色-视点）结束]
+[最新章节内容（从此角色视点）结束]
 
 请输出完整、更新后的角色“{character_name}”的Markdown格式侧写档案。
 """
