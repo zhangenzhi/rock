@@ -289,7 +289,7 @@ def call_gemini(prompt):
     print(f"\n--- 正在调用 Gemini 模型: gemini-2.5-flash-preview-05-20 ---")
     
     # 注意：在Canvas环境中，API密钥将自动提供。本地测试时，请在此处填入您的密钥。
-    api_key = "" 
+    api_key = "AIzaSyCuyn0PU-ZXvYI9T4U_PRgkLaPopd32fn8" 
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
     
     headers = {'Content-Type': 'application/json'}
