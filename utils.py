@@ -11,25 +11,34 @@ def extract_all_scene_plans(movie_plan_text):
     """从电影规划文档中提取所有场景的计划 (更稳健的版本)。"""
     scenes = []
     try:
-        # 查找所有场景标题的位置
-        header_pattern = r"场景\s*(\d+)\s*\(第\s*(\d+)\s*天(?: - (.*?))?\):\s*\[(.*?)\]"
-        matches = list(re.finditer(header_pattern, movie_plan_text))
+        # 使用更灵活的模式来分割场景块，它会查找以"场景"或"**场景"开头的行
+        scene_blocks = re.split(r'\n\s*(?=\*?\*?场景\s*\d+)', movie_plan_text)
+        
+        for block in scene_blocks:
+            if not block.strip() or "场景" not in block:
+                continue
 
-        for i, match in enumerate(matches):
-            # 获取当前场景块的文本
-            start_pos = match.start()
-            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(movie_plan_text)
-            block = movie_plan_text[start_pos:end_pos]
+            # 为每个信息定义更具弹性的正则表达式
+            header_pattern = r"场景\s*(\d+)\s*\(第\s*(\d+)\s*天(?: - (.*?))?\):\s*\[?(.*?)\]?"
+            emotion_pattern = r"情绪锚.点:\s*(.*)"
 
-            # 在块内查找情绪锚点
-            emotion_match = re.search(r"情绪锚点:\s*(.*)", block)
-            if emotion_match:
+            # 在块内查找匹配项
+            header_match = re.search(header_pattern, block)
+            emotion_match = re.search(emotion_pattern, block)
+
+            if header_match and emotion_match:
+                # 清理捕获到的副标题，移除潜在的Markdown字符
+                subtitle = header_match.group(4).strip().replace('*','').replace('`','')
+                
+                # 清理捕获到的情绪，移除潜在的Markdown字符和结尾的标点
+                emotion = emotion_match.group(1).strip().rstrip('.。')
+
                 scenes.append({
-                    "scene_number": int(match.group(1)),
-                    "day": int(match.group(2)),
-                    "part_of_day": match.group(3).strip() if match.group(3) else "全天",
-                    "subtitle": match.group(4).strip(),
-                    "emotion": emotion_match.group(1).strip(),
+                    "scene_number": int(header_match.group(1)),
+                    "day": int(header_match.group(2)),
+                    "part_of_day": header_match.group(3).strip() if header_match.group(3) else "全天",
+                    "subtitle": subtitle,
+                    "emotion": emotion,
                     "summary": None,
                     "review_feedback": None
                 })
@@ -44,3 +53,4 @@ def extract_all_scene_plans(movie_plan_text):
         print("---------------------------------\n")
 
     return scenes
+
