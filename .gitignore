@@ -1,0 +1,15 @@
+# Sensitive configuration files
+configs/infinite_fear.yaml
+
+# State and data files that should not be in the main history
+story_arc.json
+*.txt
+
+# Python cache files
+*.pyc
+__pycache__/
+
+# IDE and OS specific files
+.idea/
+.vscode/
+*.DS_Store
