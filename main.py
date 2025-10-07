@@ -17,7 +17,7 @@ NOVEL_FILE = "无限恐怖.txt"
 REPO_PATH = "."
 SUMMARY_CHAR_COUNT = 300
 PROFILES_DIR = "characters"
-ARC_STATE_FILE = "story_arc.json" # 新增：用于管理故事“大章节”状态的文件
+ARC_STATE_FILE = "story_arc.json" # 用于管理故事“大章节”状态的文件
 
 # --- 提示模板 (Prompt Templates) ---
 
@@ -59,6 +59,23 @@ TOOL_CREATION_PROMPT = """
 """
 
 # === 章节生成 (Chapter Generation) Prompts ===
+FIRST_CHAPTER_PROMPT_TEMPLATE = """
+你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是创作小说的开篇第一章。主角是一名**普通人**，他的成长仅限于心智和技能，不会获得超能力。
+
+**背景资料:**
+1.  **当前电影世界观:** {movie_plan}
+2.  **主角携带的工具:** []
+
+**写作要求:**
+-   **开篇情节:** 故事从主角在一个无聊的下午观看电影《{movie_name}》，然后意外穿越到这个电影世界中开始。
+-   **写作风格 (Show, Don't Tell):**
+    -   **避免主观形容词:** 不要直接说一个角色“很伤心”或“很生气”。请通过他/她的具体行为、表情、肢体语言和声音语调来**展现**情绪。
+    -   **心理活动具象化:** 描写心理活动时，请通过角色对具体事物的反应和行为来间接揭示，而不是直接陈述内心想法。
+-   **格式:** 请直接开始创作正文，不要添加任何评论。
+
+小说的第一章正文由此开始：
+"""
+
 SUMMARY_PROMPT_TEMPLATE = f"""
 作为一名专业的故事分析师，你的任务是为以下文本创作一份简洁的摘要。摘要长度应约为 {SUMMARY_CHAR_COUNT} 字。
 它必须捕捉到主要角色、关键情节、近期事件以及故事当前的氛围。这份摘要将作为后续所有决策的唯一依据。
@@ -130,56 +147,66 @@ PROFILE_UPDATE_PROMPT = """
 请输出完整、更新后的角色“{character_name}”的Markdown格式侧写档案：
 """
 
-INITIAL_PROMPT = "你是一位富有创造力和想象力的大师级小说家。请写一个史诗级奇幻小说的开篇。故事从一个无聊下午开始看恐怖电影后迷迷糊糊睡着了，主角穿越到电影中开始。请务必使用中文进行创作。"
-
 # --- Git操作模块 ---
 class GitManager:
-    """封装所有Git操作的模块"""
     def __init__(self, repo_path):
         self.repo_path = repo_path
         if not os.path.isdir(os.path.join(repo_path, '.git')):
             raise EnvironmentError("错误：当前目录不是一个有效的Git仓库。")
 
-    def _run_command(self, command):
+    def _run_command(self, command, suppress_errors=False):
         try:
             result = subprocess.run(command, cwd=self.repo_path, check=True, capture_output=True, text=True, encoding='utf-8')
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            if "does not have a commit" not in e.stderr:
-                print(f"Git命令执行失败: {e.stderr}")
+            if not suppress_errors:
+                print(f"Git命令执行失败: {e.stderr.strip()}")
             return None
 
     def get_current_branch(self):
         return self._run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"])
 
     def branch_exists(self, branch_name):
-        local_exists = self._run_command(["git", "branch", "--list", branch_name])
-        remote_exists = self._run_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"])
+        local_exists = self._run_command(["git", "branch", "--list", branch_name], suppress_errors=True)
+        remote_exists = self._run_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"], suppress_errors=True)
         return bool(local_exists or remote_exists)
+
+    def list_all_branches(self):
+        local_branches_raw = self._run_command(["git", "branch"])
+        remote_branches_raw = self._run_command(["git", "branch", "-r"])
+        branches = set()
+        if local_branches_raw:
+            for line in local_branches_raw.split('\n'):
+                branches.add(line.strip().replace("* ", ""))
+        if remote_branches_raw:
+            for line in remote_branches_raw.split('\n'):
+                branch_name = line.strip().replace("origin/", "")
+                if "->" not in branch_name:
+                    branches.add(branch_name)
+        return list(branches)
+
+    def delete_branch(self, branch_name):
+        print(f"正在删除分支: {branch_name}")
+        self._run_command(["git", "branch", "-D", branch_name], suppress_errors=True)
+        self._run_command(["git", "push", "origin", "--delete", branch_name], suppress_errors=True)
 
     def read_file_from_branch(self, branch_name, file_path):
         print(f"正在从分支 '{branch_name}' 读取文件 '{file_path}'...")
-        content = self._run_command(["git", "show", f"{branch_name}:{file_path}"])
-        if content is not None:
-            return content
-        content_remote = self._run_command(["git", "show", f"origin/{branch_name}:{file_path}"])
-        if content_remote is not None:
-            return content_remote
+        content = self._run_command(["git", "show", f"{branch_name}:{file_path}"], suppress_errors=True)
+        if content is not None: return content
+        content_remote = self._run_command(["git", "show", f"origin/{branch_name}:{file_path}"], suppress_errors=True)
+        if content_remote is not None: return content_remote
         print(f"警告：在本地和远程分支'{branch_name}'上都无法读取文件 '{file_path}'。")
         return None
 
     def switch_to_branch(self, branch_name, create_if_not_exists=False):
-        current_branch = self.get_current_branch()
-        if current_branch == branch_name:
-            return True
+        if self.get_current_branch() == branch_name: return True
         if self.branch_exists(branch_name):
             print(f"切换到已存在的分支: {branch_name}")
             return self._run_command(["git", "checkout", branch_name]) is not None
         elif create_if_not_exists:
-            print(f"分支 '{branch_name}' 不存在，正在创建并切换...")
             return self._run_command(["git", "checkout", "-b", branch_name]) is not None
-        else:
-            return False
+        return False
 
     def commit_and_push(self, file_paths, message):
         branch = self.get_current_branch()
@@ -193,7 +220,6 @@ class GitManager:
 
 # --- 核心逻辑 ---
 def call_ollama(prompt):
-    """调用Ollama API并获取生成的内容。"""
     print(f"\n--- 正在调用Ollama模型: {MODEL_NAME} ---")
     try:
         payload = { "model": MODEL_NAME, "prompt": prompt, "stream": False }
@@ -206,34 +232,44 @@ def call_ollama(prompt):
         return None
 
 def convert_name_to_branch(name):
-    """将中文名转换为适合Git分支的拼音名"""
-    if not name or name == "旁白":
-        return None
+    if not name or name == "旁白": return None
     return "-".join([item[0] for item in pinyin(name, style=Style.NORMAL)])
 
 def load_arc_state():
-    """读取或初始化故事世界状态"""
     if os.path.exists(ARC_STATE_FILE):
         with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return {
-        "current_movie": None,
-        "day": 0,
-        "max_days": 0,
-        "movie_plan": None,
-        "protagonist_tools": []
-    }
+    return {"current_movie": None, "day": 0, "max_days": 0, "movie_plan": None, "protagonist_tools": []}
 
 def save_arc_state(state):
-    """保存故事世界状态"""
-    with open(ARC_STATE_FILE, 'w', encoding='utf-8') as f:
+    with open(ARC_STATE_FILE, 'w', encoding='utf--8') as f:
         json.dump(state, f, ensure_ascii=False, indent=4)
 
-def plan_new_arc(arc_state):
-    """规划一个新的电影世界（大章节）"""
-    print("\n--- 正在规划新的电影世界 ---")
+def prepare_for_new_story(git):
+    """清理所有旧的故事文件和分支，为新故事做准备。"""
+    print("\n--- 正在清理环境，准备开始全新故事 ---")
     
-    # 1. 如果不是第一次，先为上一个世界生成纪念品
+    # 1. 删除旧的故事分支
+    protected_branches = ["main", "setup"]
+    all_branches = git.list_all_branches()
+    for branch in all_branches:
+        if branch not in protected_branches:
+            git.delete_branch(branch)
+    
+    # 2. 删除旧的故事文件
+    if os.path.exists(NOVEL_FILE):
+        os.remove(NOVEL_FILE)
+        print(f"已删除旧小说文件: {NOVEL_FILE}")
+    if os.path.exists(ARC_STATE_FILE):
+        os.remove(ARC_STATE_FILE)
+        print(f"已删除旧状态文件: {ARC_STATE_FILE}")
+    if os.path.exists(PROFILES_DIR):
+        import shutil
+        shutil.rmtree(PROFILES_DIR)
+        print(f"已删除旧角色目录: {PROFILES_DIR}")
+
+def plan_new_arc(arc_state):
+    print("\n--- 正在规划新的电影世界 ---")
     if arc_state["current_movie"]:
         print(f"正在为电影《{arc_state['current_movie']}》生成纪念品工具...")
         tool_json_str = call_ollama(TOOL_CREATION_PROMPT.format(movie_name=arc_state['current_movie']))
@@ -244,79 +280,77 @@ def plan_new_arc(arc_state):
         except (json.JSONDecodeError, TypeError):
             print(f"错误：无法解析工具JSON: {tool_json_str}")
 
-    # 2. 选择新电影
     new_movie = call_ollama(MOVIE_SELECTION_PROMPT)
-    if not new_movie:
-        print("错误：无法选择新电影。")
-        return None
+    if not new_movie: return None
     arc_state["current_movie"] = new_movie
     print(f"已选择新电影: {new_movie}")
 
-    # 3. 分析电影并制定规划
     movie_plan = call_ollama(MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie))
-    if not movie_plan:
-        print("错误：无法生成电影规划。")
-        return None
+    if not movie_plan: return None
     arc_state["movie_plan"] = movie_plan
     
-    # 4. 设置生存天数
     arc_state["day"] = 1
     arc_state["max_days"] = random.randint(14, 31)
-    
     print(f"电影《{new_movie}》规划完成，需生存 {arc_state['max_days']} 天。")
     return arc_state
 
 def main():
-    """主执行函数"""
     import random
     git = GitManager(REPO_PATH)
 
-    # --- 新增：启动时的分支检查与设置 ---
-    print("--- 正在检查并设置Git分支 ---")
-    current_branch = git.get_current_branch()
-    print(f"当前分支是: {current_branch}")
-    if current_branch != "main":
-        print("当前不在 'main' 分支。正在尝试切换或创建 'main' 分支用于存放故事...")
+    # --- 启动检查：必须从setup分支启动 ---
+    print("--- 正在进行启动检查 ---")
+    if git.get_current_branch() != "setup":
+        print("\n错误：请先手动切换到 'setup' 分支 (git checkout setup) 再运行此脚本。")
+        print("这是为了确保从干净、唯一的代码源开始所有操作。")
+        return
+    print("启动检查通过，当前在 'setup' 分支。")
+
+    # --- 环境与分支设置 ---
+    if not git.branch_exists("main"):
+        prepare_for_new_story(git)
+        print("\n正在创建 'main' 分支用于存放故事...")
         if not git.switch_to_branch("main", create_if_not_exists=True):
-            print("错误：无法切换或创建 'main' 分支。脚本将中止。")
-            return # 如果无法切换到主分支，则中止执行
-        print("已成功切换到 'main' 分支。")
-    # --- 分支检查结束 ---
+            print("错误：无法创建 'main' 分支。脚本将中止。")
+            return
+    else:
+        print("\n检测到已存在的 'main' 分支，将继续故事。")
+        if not git.switch_to_branch("main"):
+            print("错误：无法切换到 'main' 分支。脚本将中止。")
+            return
     
     if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
 
-    # --- 0. 加载或规划故事世界 ---
+    # --- 故事循环 ---
     arc_state = load_arc_state()
-    if not arc_state.get("current_movie") or arc_state["day"] > arc_state["max_days"]:
+    if not arc_state.get("current_movie") or arc_state["day"] >= arc_state["max_days"]:
         arc_state = plan_new_arc(arc_state)
         if not arc_state: return
     else:
         arc_state["day"] += 1
-    
     save_arc_state(arc_state)
     print(f"\n--- 当前电影:《{arc_state['current_movie']}》 | 第 {arc_state['day']} / {arc_state['max_days']} 天 ---")
 
-    # --- 1. 读取主线故事，并创建摘要 ---
     if not os.path.exists(NOVEL_FILE):
         print(f"小说文件 '{NOVEL_FILE}' 未找到。开始新故事！")
-        novel_content = call_ollama(INITIAL_PROMPT)
+        first_chapter_prompt = FIRST_CHAPTER_PROMPT_TEMPLATE.format(
+            movie_plan=arc_state['movie_plan'], movie_name=arc_state['current_movie']
+        )
+        novel_content = call_ollama(first_chapter_prompt)
         if not novel_content: return
         
         header = f"第 1 章 | {arc_state['current_movie']} - 第 {arc_state['day']} 天\n写作于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         with open(NOVEL_FILE, "w", encoding="utf-8") as f: f.write(header + novel_content + "\n\n")
-        print("已写入故事的开篇。")
         git.commit_and_push([NOVEL_FILE, ARC_STATE_FILE], "Initial commit: The story begins")
         story_text = novel_content
     else:
         with open(NOVEL_FILE, "r", encoding="utf-8") as f: story_text = f.read()
-    
     if not story_text.strip(): return
 
     summary = call_ollama(SUMMARY_PROMPT_TEMPLATE.format(story_text=story_text))
     if not summary: return
     print(f"\n--- 生成的摘要 ---\n{summary}\n--------------------")
 
-    # --- 2. 识别出场人物并获取其侧写 ---
     character_names_str = call_ollama(CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary))
     all_profiles_text = "本章没有特定角色的侧写信息。"
     if character_names_str and character_names_str.lower() != "无":
@@ -331,18 +365,14 @@ def main():
                 if content: profile_contents.append(f"--- 角色: {name} ---\n{content}\n")
         if profile_contents: all_profiles_text = "\n".join(profile_contents)
     
-    # --- 3. 决定下一章的POV角色 ---
     pov_character_name = call_ollama(POV_DECISION_PROMPT.format(summary_text=summary))
     if not pov_character_name: return
     print(f"\n--- AI编辑决定下一章视点为: {pov_character_name} ---")
 
-    # --- 4. 在主分支上生成并提交新的主线章节 ---
     next_chapter_number = len(re.findall(r"第 (\d+) 章", story_text)) + 1
     generation_prompt = GENERATION_PROMPT_TEMPLATE.format(
-        movie_plan=arc_state['movie_plan'],
-        character_pov=pov_character_name, 
-        summary_text=summary,
-        character_profiles_text=all_profiles_text,
+        movie_plan=arc_state['movie_plan'], character_pov=pov_character_name, 
+        summary_text=summary, character_profiles_text=all_profiles_text,
         protagonist_tools=json.dumps(arc_state['protagonist_tools'], ensure_ascii=False)
     )
     new_content = call_ollama(generation_prompt)
@@ -355,13 +385,13 @@ def main():
     
     git.commit_and_push([NOVEL_FILE, ARC_STATE_FILE], f"Chapter {next_chapter_number} in {arc_state['current_movie']} (Day {arc_state['day']})")
 
-    # --- 5. 切换到角色分支，更新角色侧写 ---
     character_branch = convert_name_to_branch(pov_character_name)
     if not character_branch:
+        git.switch_to_branch("setup") # 循环结束，切回setup
         return
 
     if not git.switch_to_branch(character_branch, create_if_not_exists=True):
-        git.switch_to_branch("main")
+        git.switch_to_branch("setup") # 保证切回setup
         return
         
     profile_path = os.path.join(PROFILES_DIR, f"{character_branch}_profile.md")
@@ -380,9 +410,8 @@ def main():
         with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
         git.commit_and_push([profile_path], f"Update profile for {pov_character_name} after Chapter {next_chapter_number}")
     
-    # --- 6. 任务完成，切回主分支 ---
-    print("侧写更新完成，切回 'main' 分支。")
-    git.switch_to_branch("main")
+    print("侧写更新完成，切回 'setup' 分支准备下次运行。")
+    git.switch_to_branch("setup")
     print("\n本轮循环完成。")
 
 if __name__ == "__main__":
