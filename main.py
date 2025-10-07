@@ -92,7 +92,7 @@ POV_DECISION_PROMPT = """
 """
 
 GENERATION_PROMPT_TEMPLATE = """
-你是一位才华横溢的中文小说家。你的任务是续写小说的下一章。主角是一名**普通人**，他的成长仅限于心智和技能，不会获得超能力。
+你是一位才华横溢、写作风格细腻客观的中文小说家。你的任务是续写小说的下一章。主角是一名**普通人**，他的成长仅限于心智和技能，不会获得超能力。
 
 **背景资料:**
 1.  **当前电影世界观:** {movie_plan}
@@ -102,9 +102,12 @@ GENERATION_PROMPT_TEMPLATE = """
 4.  **主角携带的工具:** {protagonist_tools}
 
 **写作要求:**
--   请严格根据以上背景资料，从角色“{character_pov}”的视点（第一人称或有限第三人称）续写。
--   确保角色的言行举止与他们的侧写档案和**普通人**的设定保持一致。
--   请直接开始创作，不要重复摘要或添加任何评论。
+-   **叙事视点:** 请严格根据以上背景资料，从角色“{character_pov}”的视点（第一人称或有限第三人称）续写。
+-   **人物一致性:** 确保角色的言行举止与他们的侧写档案和**普通人**的设定保持一致。
+-   **写作风格 (Show, Don't Tell):**
+    -   **避免主观形容词:** 不要直接说一个角色“很伤心”或“很生气”。请通过他/她的具体行为、表情、肢体语言和声音语调来**展现**情绪。
+    -   **心理活动具象化:** 描写心理活动时，请通过角色对具体事物的反应和行为来间接揭示，而不是直接陈述内心想法。
+-   **格式:** 请直接开始创作，不要重复摘要或添加任何评论。
 
 下一章正文由此开始：
 """
@@ -267,9 +270,20 @@ def main():
     """主执行函数"""
     import random
     git = GitManager(REPO_PATH)
+
+    # --- 新增：启动时的分支检查与设置 ---
+    print("--- 正在检查并设置Git分支 ---")
+    current_branch = git.get_current_branch()
+    print(f"当前分支是: {current_branch}")
+    if current_branch != "main":
+        print("当前不在 'main' 分支。正在尝试切换或创建 'main' 分支用于存放故事...")
+        if not git.switch_to_branch("main", create_if_not_exists=True):
+            print("错误：无法切换或创建 'main' 分支。脚本将中止。")
+            return # 如果无法切换到主分支，则中止执行
+        print("已成功切换到 'main' 分支。")
+    # --- 分支检查结束 ---
     
     if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
-    git.switch_to_branch("main")
 
     # --- 0. 加载或规划故事世界 ---
     arc_state = load_arc_state()
