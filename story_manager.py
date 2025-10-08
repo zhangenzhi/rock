@@ -41,14 +41,18 @@ class StoryManager:
     def _save_arc_state(self):
         """保存故事世界状态"""
         ARC_STATE_FILE = self.config['story_arc_file']
-        os.makedirs(os.path.dirname(ARC_STATE_FILE), exist_ok=True)
+        output_dir = os.path.dirname(ARC_STATE_FILE)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         with open(ARC_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.arc_state, f, ensure_ascii=False, indent=4)
 
     def _load_story_text(self):
         """加载小说全文"""
         NOVEL_FILE = self.config['novel_file_name']
-        os.makedirs(os.path.dirname(NOVEL_FILE), exist_ok=True)
+        output_dir = os.path.dirname(NOVEL_FILE)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         if os.path.exists(NOVEL_FILE):
             with open(NOVEL_FILE, "r", encoding="utf-8") as f:
                 return f.read()
@@ -63,9 +67,11 @@ class StoryManager:
             if branch not in protected_branches:
                 self.git.delete_branch(branch)
         
+        # 使用os.path.dirname确保我们能正确处理output/characters这样的路径
         output_dir = os.path.dirname(self.config['novel_file_name'])
-        if os.path.exists(output_dir):
+        if output_dir and os.path.exists(output_dir):
             import shutil
+            # 只删除目录内容，不删除目录本身
             for filename in os.listdir(output_dir):
                 file_path = os.path.join(output_dir, filename)
                 try:
@@ -75,7 +81,9 @@ class StoryManager:
                         shutil.rmtree(file_path)
                 except Exception as e:
                     print(f'Failed to delete {file_path}. Reason: {e}')
+
         print("环境清理完成。")
+
 
     def _plan_new_arc(self):
         """规划一个新的电影世界（大章节），包含审稿和重写流程。"""
@@ -131,14 +139,17 @@ class StoryManager:
         """从电影规划文档中提取所有场景的计划 (更稳健的版本)。"""
         scenes = []
         try:
+            # 查找所有场景标题的位置 (兼容多种Markdown格式，以及带或不带方括号的副标题)
             header_pattern = r"\*?\*?场景\s*(\d+)\s*\(第\s*(\d+)\s*天(?: - (.*?))?\):\s*\[?([^\]\n]+)\]?"
             matches = list(re.finditer(header_pattern, movie_plan_text))
 
             for i, match in enumerate(matches):
+                # 获取当前场景块的文本
                 start_pos = match.start()
                 end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(movie_plan_text)
                 block = movie_plan_text[start_pos:end_pos]
 
+                # 在块内查找情绪锚点 (使用更具弹性的正则表达式，忽略前缀的Markdown格式)
                 emotion_match = re.search(r"情绪锚点\*\*?:\s*(.*)", block)
                 if emotion_match:
                     scenes.append({
@@ -146,6 +157,7 @@ class StoryManager:
                         "day": int(match.group(2)),
                         "part_of_day": match.group(3).strip() if match.group(3) else "全天",
                         "subtitle": match.group(4).strip().replace('*','').replace('`',''),
+                        # 清理捕获到的情绪，移除潜在的Markdown字符和结尾的标点
                         "emotion": emotion_match.group(1).strip().replace('*','').rstrip('.。'),
                         "summary_before": None,
                         "summary_after": None,
@@ -273,6 +285,7 @@ class StoryManager:
             
             # 将完成的arc存入历史记录
             self.arc_state["completed_movie_arcs"].append(movie_arc)
+            self.arc_state["current_movie_arc"] = None # 清空当前arc
 
             if movie_arc["movie_name"]:
                 print(f"正在为电影《{movie_arc['movie_name']}》生成纪念品工具...")
@@ -313,7 +326,6 @@ class StoryManager:
         NOVEL_FILE = self.config['novel_file_name']
         PROFILES_DIR = self.config['character_profiles_directory']
         
-        # 角色侧写更新
         updated_profiles = []
         if self.arc_state["current_location"] == "movie_world":
             profile_filename = f"{convert_name_to_filename(pov_character_name)}_profile.md"
@@ -333,7 +345,7 @@ class StoryManager:
 
             updated_profile = call_gemini(profile_prompt, self.api_key)
             if updated_profile:
-                if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
+                os.makedirs(PROFILES_DIR, exist_ok=True)
                 with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
                 updated_profiles.append(profile_path)
 
@@ -408,3 +420,4 @@ class StoryManager:
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         
         print("\n本轮循环完成。")
+
