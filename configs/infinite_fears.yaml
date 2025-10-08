@@ -1,6 +1,8 @@
 # Gemini API Configuration
 # Get your API key from Google AI Studio: https://aistudio.google.com/
-gemini_api_key: "AIzaSyCuyn0PU-ZXvYI9T4U_PRgkLaPopd32fn8"
+# gemini_api_key: "AIzaSyCuyn0PU-ZXvYI9T4U_PRgkLaPopd32fn8"
+
+gemini_api_key: "AIzaSyDZBCU31q3wmVsUdLJ5qtzKivL8kF97G28"
 
 # General Settings
 novel_file_name: "infinite_fears.md"
