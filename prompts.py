@@ -6,10 +6,10 @@ MOVIE_SELECTION_PROMPT = """
 """
 
 MOVIE_ANALYSIS_PROMPT = """
-你是一位顶级的电影编jwt和世界构建师。你将为小说的一个新篇章（大章节）做框架规划。
+你是一位顶级的电影编剧和世界构建师。你将为小说的一个新篇章（大章节）做框架规划。
 主角名叫**江浩**，是一名中国的**普通待业青年**，他将穿越到恐怖电影《{movie_name}》中。
 
-你的任务是输出一个**JSON对象**，该对象包含完整的场景式剧情大纲。
+你的任务是输出一个**JSON对象**，该对象包含完整的世界观、角色设定和场景式剧情大纲。
 你的输出**必须**是一个严格的、单一的、不包含任何额外解释或Markdown格式的JSON对象。
 
 请遵循以下JSON结构：
@@ -18,18 +18,19 @@ MOVIE_ANALYSIS_PROMPT = """
     "protagonist_adaptation": "(请在此处填写：改编电影的核心情节，使其符合主角“江浩”的身份。为他被卷入核心事件设计一个原创且合理的动机。)",
     "horror_core": "(请在此处填写：电影的核心恐怖来源是什么？)",
     "scene_atmosphere": "(请在此处填写：描述这个世界的主要场景和整体氛围。)",
-    "key_new_characters": [
-      {{
-        "name": "(NPC 1 姓名)",
-        "personality": "(NPC 1 性格)",
-        "function": "(NPC 1 在剧情中的具体作用)"
-      }}
-    ],
     "meta_narrative_foreshadowing": {{
         "content": "(请在此处构思一种方式，让角色偶尔能感觉到一种被无形之手操纵的诡异感，作为隐藏伏笔。)",
         "trigger_scene": "(请在此处指定伏笔被揭示的**高潮场景编号**，例如：13)"
     }}
   }},
+  "character_pool": [
+      {{
+        "name": "(NPC 1 姓名)",
+        "personality": "(NPC 1 性格)",
+        "function": "(NPC 1 在剧情中的具体作用)",
+        "initial_profile": "(为该NPC生成一份详细的初始角色侧写，Markdown格式。内容应包括其背景、动机、对当前环境的看法等，以便写手理解。)"
+      }}
+  ],
   "scenes": [
     {{
       "scene_number": 1,
@@ -37,13 +38,13 @@ MOVIE_ANALYSIS_PROMPT = """
       "part_of_day": "白天",
       "subtitle": "(场景1的副标题/核心事件)",
       "synopsis": "(场景1的剧情梗概，并明确指出角色之间需要进行的关键互动或合作)",
-      "character_perspective": "(提示在这些事件中，哪位角色的视点（POV）最能体现本章情绪，并简述其可能的反应或视角)",
+      "pov_character": "(**必须**从 '江浩' 或你在 'character_pool' 中定义的人物中，为此场景指定一位**核心叙事视点角色**)",
       "emotion_anchor": "(场景1的核心情绪)"
     }}
   ]
 }}
 
-请为整个故事弧规划 10-15 个场景，并将它们填充到 "scenes" 数组中。确保JSON格式的完整性和正确性。
+请为整个故事弧规划 10-15 个场景，并将它们填充到 "scenes" 数组中。在规划POV时，请确保主角和配角的视点分布大致均衡（例如55开），以提供多维度的叙事。确保JSON格式的完整性和正确性。
 """
 
 ARCHITECT_REVIEW_PROMPT = """

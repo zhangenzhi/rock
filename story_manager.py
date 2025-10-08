@@ -2,6 +2,7 @@ import os
 import json
 import random
 import re
+import time
 from datetime import datetime
 import prompts
 from llm_api import call_gemini
@@ -75,18 +76,52 @@ class StoryManager:
                 except Exception as e:
                     print(f'Failed to delete {file_path}. Reason: {e}')
         print("环境清理完成。")
+        
+    def _call_gemini_and_parse_json(self, prompt, max_retries=3):
+        """
+        调用 Gemini API 期望获得JSON响应，并包含校验和重试逻辑。
+        """
+        for attempt in range(max_retries):
+            print(f"正在尝试第 {attempt + 1}/{max_retries} 次生成和解析JSON...")
+            json_str = call_gemini(prompt, self.api_key)
+            if not json_str:
+                print("API调用未能返回内容，将重试...")
+                time.sleep(2) # 短暂暂停后重试
+                continue
 
+            try:
+                # 更积极地清理字符串，以防AI添加了Markdown标记
+                match = re.search(r'\{.*\}', json_str, re.DOTALL)
+                if not match:
+                    raise json.JSONDecodeError("响应中未找到有效的JSON结构。", json_str, 0)
+                
+                cleaned_json_str = match.group(0)
+                json_obj = json.loads(cleaned_json_str)
+                print("JSON生成和解析成功。")
+                return json_obj, cleaned_json_str # 同时返回对象和干净的字符串
+            except json.JSONDecodeError as e:
+                print(f"警告：JSON解析失败: {e}")
+                if attempt < max_retries - 1:
+                    print("AI可能返回了不完整的JSON，将重试。")
+                else:
+                    print("已达到最大重试次数，无法获取有效的JSON。")
+                    print("\n--- DEBUG: 最终解析失败的JSON字符串 ---")
+                    print(json_str)
+                    print("---------------------------------\n")
+        return None, None # 所有重试都失败了
 
     def _plan_new_arc(self):
         """规划一个新的电影世界（大章节），包含审稿和重写流程。"""
         print("\n--- 正在规划新的电影世界 ---")
         
         new_movie = call_gemini(prompts.MOVIE_SELECTION_PROMPT, self.api_key)
-        if not new_movie: return None
+        if not new_movie: return None, []
 
         # --- 大纲初稿 ---
-        draft_plan_json_str = call_gemini(prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie), self.api_key)
-        if not draft_plan_json_str: return None
+        draft_plan_data, draft_plan_json_str = self._call_gemini_and_parse_json(
+            prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie)
+        )
+        if not draft_plan_data: return None, []
         
         # --- 大纲审稿与重写循环 ---
         print("\n--- 开始剧情大纲审稿与重写流程 ---")
@@ -102,45 +137,55 @@ class StoryManager:
             print(f"--- 总编反馈 ---\n{feedback}\n----------------")
             
             rewrite_prompt = prompts.ARCHITECT_REWRITE_PROMPT.format(original_plan=polished_plan_json_str, feedback=feedback)
-            rewritten_plan = call_gemini(rewrite_prompt, self.api_key)
-            if not rewritten_plan:
+            
+            # 在重写时也使用带校验的调用
+            rewritten_plan_data, rewritten_plan_json_str = self._call_gemini_and_parse_json(rewrite_prompt)
+            if not rewritten_plan_data:
                 print("大纲重写失败，保留上一版本。")
                 break
-            polished_plan_json_str = rewritten_plan
+            polished_plan_json_str = rewritten_plan_json_str
         
         print("\n--- 剧情大纲打磨完成 ---")
         
-        try:
-            cleaned_json_str = polished_plan_json_str.strip().replace("```json", "").replace("```", "")
-            plan_data = json.loads(cleaned_json_str)
+        # 最终解析已经由 _call_gemini_and_parse_json 完成
+        final_plan_data, final_plan_str = self._call_gemini_and_parse_json(f"请格式化并返回这个JSON:\n{polished_plan_json_str}")
+        if not final_plan_data:
+             return None, []
 
-            scenes = plan_data.get("scenes", [])
-            if not scenes:
-                print("错误：AI返回的JSON中不包含'scenes'列表或列表为空。")
-                return None
+        scenes = final_plan_data.get("scenes", [])
+        for scene in scenes:
+            scene["summary_before"] = None
+            scene["summary_after"] = None
+            scene["review_feedback"] = None
+            if "emotion_anchor" in scene:
+                scene["emotion"] = scene.pop("emotion_anchor")
 
-            for scene in scenes:
-                scene["summary_before"] = None
-                scene["summary_after"] = None
-                scene["review_feedback"] = None
-                if "emotion_anchor" in scene:
-                    scene["emotion"] = scene.pop("emotion_anchor")
+        arc = {
+            "movie_name": new_movie,
+            "status": "active",
+            "current_scene_index": -1,
+            "total_scenes": len(scenes),
+            "movie_plan": final_plan_data.get("overall_setting", {}),
+            "scenes": scenes
+        }
+        
+        new_profile_paths = []
+        PROFILES_DIR = self.config['character_profiles_directory']
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        character_pool = final_plan_data.get("character_pool", [])
+        for char_data in character_pool:
+            char_name = char_data.get("name")
+            initial_profile = char_data.get("initial_profile")
+            if char_name and initial_profile:
+                profile_filename = f"{convert_name_to_filename(char_name)}_profile.md"
+                profile_path = os.path.join(PROFILES_DIR, profile_filename)
+                with open(profile_path, "w", encoding="utf-8") as f:
+                    f.write(initial_profile)
+                new_profile_paths.append(profile_path)
+        
+        print(f"电影《{new_movie}》规划完成，共 {len(arc['scenes'])} 个场景。")
+        return arc, new_profile_paths
 
-            arc = {
-                "movie_name": new_movie,
-                "status": "active",
-                "current_scene_index": -1,
-                "total_scenes": len(scenes),
-                "movie_plan": plan_data.get("overall_setting", {}),
-                "scenes": scenes
-            }
-            
-            print(f"电影《{new_movie}》规划完成，共 {len(arc['scenes'])} 个场景。")
-            return arc
-
-        except json.JSONDecodeError as e:
-            print(f"错误：无法从最终规划文档中解析出JSON: {e}")
-            return None
 
     def _handle_movie_chapter(self, summary_before):
         """处理电影世界中的一个场景章节"""
@@ -190,17 +235,8 @@ class StoryManager:
                             profile_contents.append(f"--- 角色: {name} ---\n{f.read()}\n")
                 if profile_contents: all_profiles_text = "\n".join(profile_contents)
             
-            architect_suggestion = scene_plan.get("character_perspective", "无建议")
-            pov_character_name = call_gemini(
-                prompts.POV_DECISION_PROMPT.format(
-                    summary_text=summary_before,
-                    architect_suggestion=architect_suggestion
-                ), 
-                self.api_key
-            )
-
-            if not pov_character_name: return None, None
-            print(f"\n--- AI编辑决定下一章视点为: {pov_character_name} ---")
+            pov_character_name = scene_plan.get("pov_character", self.arc_state["protagonist_name"])
+            print(f"\n--- 架构师预设本章视点为: {pov_character_name} ---")
 
             generation_prompt = prompts.GENERATION_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, character_pov=pov_character_name, 
@@ -273,19 +309,14 @@ class StoryManager:
             self.arc_state["current_movie_arc"] = None
 
             if movie_arc["movie_name"]:
-                tool_json_str = call_gemini(prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']), self.api_key)
-                try:
-                    # 确保返回的是一个有效的JSON对象
-                    cleaned_tool_str = tool_json_str.strip().replace("```json", "").replace("```", "")
-                    new_tool = json.loads(cleaned_tool_str)
-                    if isinstance(new_tool, dict):
-                        self.arc_state["protagonist_tools"].append(new_tool)
-                        print(f"获得新工具: {new_tool.get('tool_name')}")
-                    else:
-                        print(f"错误：AI返回的工具不是一个有效的JSON对象: {new_tool}")
-                except (json.JSONDecodeError, TypeError) as e:
-                    print(f"错误：无法解析工具JSON: {e}")
-                    print(f"原始字符串: {tool_json_str}")
+                new_tool, _ = self._call_gemini_and_parse_json(
+                    prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name'])
+                )
+                if new_tool and isinstance(new_tool, dict):
+                    self.arc_state["protagonist_tools"].append(new_tool)
+                    print(f"获得新工具: {new_tool.get('tool_name')}")
+                else:
+                    print(f"错误：未能为《{movie_arc['movie_name']}》生成有效的纪念品工具。")
             
             new_content, pov_character_name = self._handle_real_world_chapter(summary_before)
             return new_content, pov_character_name, "现实的谜团"
@@ -300,11 +331,14 @@ class StoryManager:
         """处理现实世界结束，进入新电影世界的情节"""
         print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
         self.arc_state["current_location"] = "movie_world"
-        self.arc_state["current_movie_arc"] = self._plan_new_arc()
-        if not self.arc_state["current_movie_arc"]: return None, None, None
+        
+        arc, new_profile_paths = self._plan_new_arc()
+        if not arc: return None, None, None
+        self.arc_state["current_movie_arc"] = arc
         
         self._save_arc_state()
-        self.git.commit_and_push([self.config['story_arc_file']], f"Architect Plan: {self.arc_state['current_movie_arc']['movie_name']}")
+        files_to_commit = [self.config['story_arc_file']] + new_profile_paths
+        self.git.commit_and_push(files_to_commit, f"Architect Plan: {self.arc_state['current_movie_arc']['movie_name']}")
 
         self.arc_state["current_movie_arc"]["current_scene_index"] += 1
         new_content, pov_character_name = self._handle_movie_chapter("无（这是电影世界的第一个场景）")
@@ -316,7 +350,6 @@ class StoryManager:
         NOVEL_FILE = self.config['novel_file_name']
         PROFILES_DIR = self.config['character_profiles_directory']
         
-        # 获取本章所有出场人物，准备更新他们的侧写
         summary_of_new_content = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=new_content), self.api_key)
         character_names_str = call_gemini(prompts.CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary_of_new_content), self.api_key)
         
