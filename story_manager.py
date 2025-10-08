@@ -16,8 +16,9 @@ class StoryManager:
         self.config = config
         self.git = git_manager
         self.api_key = config['gemini_api_key']
-        self.arc_state = self._load_arc_state()
-        self.story_text = self._load_story_text()
+        # 状态和文本的加载推迟到 run_cycle 中，以确保在正确的分支上执行
+        self.arc_state = None
+        self.story_text = ""
 
     def _load_arc_state(self):
         """读取或初始化故事世界状态"""
@@ -25,7 +26,6 @@ class StoryManager:
         if os.path.exists(ARC_STATE_FILE):
             with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
                 state = json.load(f)
-                # 向后兼容，确保旧的状态文件有completed_movie_arcs
                 if "completed_movie_arcs" not in state:
                     state["completed_movie_arcs"] = []
                 return state
@@ -35,7 +35,7 @@ class StoryManager:
             "current_location": "real_world",
             "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
             "current_movie_arc": None,
-            "completed_movie_arcs": [] # 新增，用于存储已完成的电影世界
+            "completed_movie_arcs": []
         }
 
     def _save_arc_state(self):
@@ -59,14 +59,8 @@ class StoryManager:
         return ""
 
     def prepare_for_new_story(self):
-        """清理所有旧的故事文件和分支，为新故事做准备。"""
+        """清理所有旧的故事文件，为新故事做准备。"""
         print("\n--- 正在清理环境，准备开始全新故事 ---")
-        protected_branches = ["main", "setup"]
-        all_branches = self.git.list_all_branches()
-        for branch in all_branches:
-            if branch not in protected_branches:
-                self.git.delete_branch(branch)
-        
         output_dir = os.path.dirname(self.config['novel_file_name'])
         if output_dir and os.path.exists(output_dir):
             import shutil
@@ -81,45 +75,25 @@ class StoryManager:
                     print(f'Failed to delete {file_path}. Reason: {e}')
         print("环境清理完成。")
 
+
     def _plan_new_arc(self):
-        """规划一个新的电影世界（大章节），包含审稿和重写流程。"""
+        """规划一个新的电影世界（大章节），直接返回JSON对象。"""
         print("\n--- 正在规划新的电影世界 ---")
         
         new_movie = call_gemini(prompts.MOVIE_SELECTION_PROMPT, self.api_key)
         if not new_movie: return None
 
-        # --- 大纲初稿 ---
-        draft_plan_json_str = call_gemini(prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie), self.api_key)
-        if not draft_plan_json_str: return None
-        
-        # --- 大纲审稿与重写循环 ---
-        print("\n--- 开始剧情大纲审稿与重写流程 ---")
-        polished_plan_json_str = draft_plan_json_str
-        for i in range(self.config['rewrite_cycles']):
-            print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮大纲打磨 ---")
-            review_prompt = prompts.ARCHITECT_REVIEW_PROMPT.format(movie_plan_draft=polished_plan_json_str)
-            feedback = call_gemini(review_prompt, self.api_key)
-            if not feedback:
-                print("大纲审稿失败，跳过本轮重写。")
-                continue
-            
-            print(f"--- 总编反馈 ---\n{feedback}\n----------------")
-            
-            rewrite_prompt = prompts.ARCHITECT_REWRITE_PROMPT.format(original_plan=polished_plan_json_str, feedback=feedback)
-            rewritten_plan = call_gemini(rewrite_prompt, self.api_key)
-            if not rewritten_plan:
-                print("大纲重写失败，保留上一版本。")
-                break
-            polished_plan_json_str = rewritten_plan
-        
-        print("\n--- 剧情大纲打磨完成 ---")
-        
+        movie_plan_json_str = call_gemini(prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie), self.api_key)
+        if not movie_plan_json_str: return None
+
         try:
-            cleaned_json_str = polished_plan_json_str.strip().replace("```json", "").replace("```", "")
+            cleaned_json_str = movie_plan_json_str.strip().replace("```json", "").replace("```", "")
             plan_data = json.loads(cleaned_json_str)
 
             scenes = plan_data.get("scenes", [])
-            if not scenes: return None
+            if not scenes:
+                print("错误：AI返回的JSON中不包含'scenes'列表或列表为空。")
+                return None
 
             for scene in scenes:
                 scene["summary_before"] = None
@@ -139,8 +113,9 @@ class StoryManager:
             
             print(f"电影《{new_movie}》规划完成，共 {len(arc['scenes'])} 个场景。")
             return arc
-        except json.JSONDecodeError:
-            print("错误：无法从最终规划文档中解析出JSON。")
+
+        except json.JSONDecodeError as e:
+            print(f"错误：无法解析构建师返回的JSON: {e}")
             return None
 
     def _handle_movie_chapter(self, summary_before):
@@ -364,10 +339,11 @@ class StoryManager:
 
     def run_cycle(self):
         """执行一个完整的创作循环。"""
-        if not self.git.switch_to_branch("main"):
-            print("错误：无法切换到 'main' 分支，中止执行。")
-            self.git.switch_to_branch("setup")
-            return
+        # 确保在 main 分支上执行
+        if self.git.get_current_branch() != "main":
+            if not self.git.switch_to_branch("main"):
+                print("错误：无法切换到 'main' 分支，中止执行。")
+                return
 
         os.makedirs(self.config['character_profiles_directory'], exist_ok=True)
         
@@ -377,7 +353,6 @@ class StoryManager:
         summary_before = "无（这是故事的开篇）" if not self.story_text else call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=self.story_text), self.api_key)
         if not summary_before:
             print("生成事前摘要失败，本轮循环中止。")
-            self.git.switch_to_branch("setup")
             return
         if self.story_text: print(f"\n--- 生成的事前摘要 ---\n{summary_before}\n--------------------")
         
@@ -390,13 +365,10 @@ class StoryManager:
 
         if not new_content or not pov_character_name:
             print("未能生成有效内容，本轮循环中止。")
-            self.git.switch_to_branch("setup")
             return
             
         print("\n--- 章节打磨完成 ---")
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         
-        print("切回 'setup' 分支准备下次运行。")
-        self.git.switch_to_branch("setup")
         print("\n本轮循环完成。")
 
