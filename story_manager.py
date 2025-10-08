@@ -24,24 +24,31 @@ class StoryManager:
         ARC_STATE_FILE = self.config['story_arc_file']
         if os.path.exists(ARC_STATE_FILE):
             with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                state = json.load(f)
+                # 向后兼容，确保旧的状态文件有completed_movie_arcs
+                if "completed_movie_arcs" not in state:
+                    state["completed_movie_arcs"] = []
+                return state
         return {
             "protagonist_name": "江浩",
             "protagonist_tools": [],
             "current_location": "real_world",
             "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
-            "current_movie_arc": None
+            "current_movie_arc": None,
+            "completed_movie_arcs": [] # 新增，用于存储已完成的电影世界
         }
 
     def _save_arc_state(self):
         """保存故事世界状态"""
         ARC_STATE_FILE = self.config['story_arc_file']
+        os.makedirs(os.path.dirname(ARC_STATE_FILE), exist_ok=True)
         with open(ARC_STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.arc_state, f, ensure_ascii=False, indent=4)
 
     def _load_story_text(self):
         """加载小说全文"""
         NOVEL_FILE = self.config['novel_file_name']
+        os.makedirs(os.path.dirname(NOVEL_FILE), exist_ok=True)
         if os.path.exists(NOVEL_FILE):
             with open(NOVEL_FILE, "r", encoding="utf-8") as f:
                 return f.read()
@@ -56,11 +63,9 @@ class StoryManager:
             if branch not in protected_branches:
                 self.git.delete_branch(branch)
         
-        # 使用os.path.dirname确保我们能正确处理output/characters这样的路径
         output_dir = os.path.dirname(self.config['novel_file_name'])
         if os.path.exists(output_dir):
             import shutil
-            # 只删除目录内容，不删除目录本身
             for filename in os.listdir(output_dir):
                 file_path = os.path.join(output_dir, filename)
                 try:
@@ -70,60 +75,90 @@ class StoryManager:
                         shutil.rmtree(file_path)
                 except Exception as e:
                     print(f'Failed to delete {file_path}. Reason: {e}')
-
         print("环境清理完成。")
 
-
     def _plan_new_arc(self):
-        """规划一个新的电影世界（大章节），直接返回JSON对象。"""
+        """规划一个新的电影世界（大章节），包含审稿和重写流程。"""
         print("\n--- 正在规划新的电影世界 ---")
         
         new_movie = call_gemini(prompts.MOVIE_SELECTION_PROMPT, self.api_key)
         if not new_movie: return None
 
-        movie_plan_json_str = call_gemini(prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie), self.api_key)
-        if not movie_plan_json_str: return None
-
-        try:
-            # 清理JSON字符串，移除可能的Markdown代码块标记
-            cleaned_json_str = movie_plan_json_str.strip().replace("```json", "").replace("```", "")
-            plan_data = json.loads(cleaned_json_str)
-
-            scenes = plan_data.get("scenes", [])
-            if not scenes:
-                print("错误：AI返回的JSON中不包含'scenes'列表或列表为空。")
-                print("\n--- DEBUG: 解析失败的JSON对象 ---")
-                print(plan_data)
-                print("---------------------------------\n")
-                return None
-
-            # 为每个场景添加后续流程需要的字段
-            for scene in scenes:
-                scene["summary_before"] = None
-                scene["summary_after"] = None
-                scene["review_feedback"] = None
-                # 标准化情绪键名
-                if "emotion_anchor" in scene:
-                    scene["emotion"] = scene.pop("emotion_anchor")
-
-            arc = {
-                "movie_name": new_movie,
-                "status": "active",
-                "current_scene_index": -1,
-                "total_scenes": len(scenes),
-                "movie_plan": plan_data.get("overall_setting", {}), # movie_plan现在只存储整体设定
-                "scenes": scenes
-            }
+        # --- 大纲初稿 ---
+        draft_plan_text = call_gemini(prompts.MOVIE_ANALYSIS_PROMPT.format(movie_name=new_movie), self.api_key)
+        if not draft_plan_text: return None
+        
+        # --- 大纲审稿与重写循环 ---
+        print("\n--- 开始剧情大纲审稿与重写流程 ---")
+        polished_plan_text = draft_plan_text
+        for i in range(self.config['rewrite_cycles']):
+            print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮大纲打磨 ---")
+            review_prompt = prompts.ARCHITECT_REVIEW_PROMPT.format(movie_plan_draft=polished_plan_text)
+            feedback = call_gemini(review_prompt, self.api_key)
+            if not feedback:
+                print("大纲审稿失败，跳过本轮重写。")
+                continue
             
-            print(f"电影《{new_movie}》规划完成，共 {len(arc['scenes'])} 个场景。")
-            return arc
-
-        except json.JSONDecodeError as e:
-            print(f"错误：无法解析构建师返回的JSON: {e}")
-            print("\n--- DEBUG: 解析失败的JSON字符串 ---")
-            print(movie_plan_json_str)
-            print("---------------------------------\n")
+            print(f"--- 总编反馈 ---\n{feedback}\n----------------")
+            
+            rewrite_prompt = prompts.ARCHITECT_REWRITE_PROMPT.format(original_plan=polished_plan_text, feedback=feedback)
+            rewritten_plan = call_gemini(rewrite_prompt, self.api_key)
+            if not rewritten_plan:
+                print("大纲重写失败，保留上一版本。")
+                break
+            polished_plan_text = rewritten_plan
+        
+        print("\n--- 剧情大纲打磨完成 ---")
+        
+        scenes = self._extract_all_scene_plans(polished_plan_text)
+        if not scenes:
+            print("错误：无法从最终规划文档中解析出任何场景。")
             return None
+
+        arc = {
+            "movie_name": new_movie,
+            "status": "active",
+            "current_scene_index": -1,
+            "total_scenes": len(scenes),
+            "movie_plan": polished_plan_text, 
+            "scenes": scenes
+        }
+        
+        print(f"电影《{new_movie}》规划完成，共 {len(arc['scenes'])} 个场景。")
+        return arc
+
+    def _extract_all_scene_plans(self, movie_plan_text):
+        """从电影规划文档中提取所有场景的计划 (更稳健的版本)。"""
+        scenes = []
+        try:
+            header_pattern = r"\*?\*?场景\s*(\d+)\s*\(第\s*(\d+)\s*天(?: - (.*?))?\):\s*\[?([^\]\n]+)\]?"
+            matches = list(re.finditer(header_pattern, movie_plan_text))
+
+            for i, match in enumerate(matches):
+                start_pos = match.start()
+                end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(movie_plan_text)
+                block = movie_plan_text[start_pos:end_pos]
+
+                emotion_match = re.search(r"情绪锚点\*\*?:\s*(.*)", block)
+                if emotion_match:
+                    scenes.append({
+                        "scene_number": int(match.group(1)),
+                        "day": int(match.group(2)),
+                        "part_of_day": match.group(3).strip() if match.group(3) else "全天",
+                        "subtitle": match.group(4).strip().replace('*','').replace('`',''),
+                        "emotion": emotion_match.group(1).strip().replace('*','').rstrip('.。'),
+                        "summary_before": None,
+                        "summary_after": None,
+                        "review_feedback": None
+                    })
+        except Exception as e:
+            print(f"解析场景计划时出错: {e}")
+        
+        if not scenes:
+            print("\n--- DEBUG: 解析失败的规划文档 ---")
+            print(movie_plan_text)
+            print("---------------------------------\n")
+        return scenes
 
     def _handle_movie_chapter(self, summary_before):
         """处理电影世界中的一个场景章节"""
@@ -138,21 +173,16 @@ class StoryManager:
         scene_plan["summary_before"] = summary_before
         
         chapter_subtitle = scene_plan["subtitle"]
-        emotional_anchor = scene_plan.get("emotion", "未知") # 使用 .get() 增加稳健性
+        emotional_anchor = scene_plan.get("emotion", "未知")
         print(f"\n--- 本章主题 (副标题): {chapter_subtitle} ---")
         print(f"--- 核心情绪锚点: {emotional_anchor} ---")
 
         is_first_scene = (scene_index == 0)
 
-        # 将movie_plan对象转换为字符串以便传递
-        movie_plan_str = json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False, indent=2)
-
         if is_first_scene: 
             generation_prompt = prompts.FIRST_CHAPTER_PROMPT_TEMPLATE.format(
-                movie_plan=movie_plan_str, 
-                movie_name=movie_arc['movie_name'],
-                chapter_subtitle=chapter_subtitle, 
-                emotional_anchor=emotional_anchor
+                movie_plan=movie_arc['movie_plan'], movie_name=movie_arc['movie_name'],
+                chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
             )
             pov_character_name = self.arc_state["protagonist_name"]
             all_profiles_text = "无"
@@ -175,12 +205,9 @@ class StoryManager:
             print(f"\n--- AI编辑决定下一章视点为: {pov_character_name} ---")
 
             generation_prompt = prompts.GENERATION_PROMPT_TEMPLATE.format(
-                movie_plan=movie_plan_str, 
-                character_pov=pov_character_name, 
-                summary_text=summary_before, 
-                character_profiles_text=all_profiles_text,
-                chapter_subtitle=chapter_subtitle, 
-                emotional_anchor=emotional_anchor,
+                movie_plan=movie_arc['movie_plan'], character_pov=pov_character_name, 
+                summary_text=summary_before, character_profiles_text=all_profiles_text,
+                chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor,
                 protagonist_tools=json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False)
             )
 
@@ -192,10 +219,8 @@ class StoryManager:
         for i in range(self.config['rewrite_cycles']):
             print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮打磨 ---")
             review_prompt = prompts.REVIEW_PROMPT_TEMPLATE.format(
-                chapter_text=polished_content, 
-                movie_plan=movie_plan_str,
-                chapter_subtitle=chapter_subtitle, 
-                emotional_anchor=emotional_anchor
+                chapter_text=polished_content, movie_plan=movie_arc['movie_plan'],
+                chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
             )
             feedback = call_gemini(review_prompt, self.api_key)
             if not feedback: 
@@ -206,15 +231,11 @@ class StoryManager:
             final_feedback = feedback
 
             rewrite_prompt = prompts.REWRITE_PROMPT_TEMPLATE.format(
-                movie_plan=movie_plan_str, 
-                summary_text=summary_before,
+                movie_plan=movie_arc['movie_plan'], summary_text=summary_before,
                 character_profiles_text=all_profiles_text,
                 protagonist_tools=json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
-                character_pov=pov_character_name, 
-                original_text=polished_content,
-                feedback=feedback, 
-                chapter_subtitle=chapter_subtitle, 
-                emotional_anchor=emotional_anchor
+                character_pov=pov_character_name, original_text=polished_content,
+                feedback=feedback, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
             )
             rewritten_content = call_gemini(rewrite_prompt, self.api_key)
             if not rewritten_content:
@@ -249,6 +270,10 @@ class StoryManager:
             print(f"电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
             self.arc_state["current_location"] = "real_world"
             movie_arc["status"] = "completed"
+            
+            # 将完成的arc存入历史记录
+            self.arc_state["completed_movie_arcs"].append(movie_arc)
+
             if movie_arc["movie_name"]:
                 print(f"正在为电影《{movie_arc['movie_name']}》生成纪念品工具...")
                 tool_json_str = call_gemini(prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']), self.api_key)
@@ -287,6 +312,30 @@ class StoryManager:
         """将最终章节内容写入文件并提交"""
         NOVEL_FILE = self.config['novel_file_name']
         PROFILES_DIR = self.config['character_profiles_directory']
+        
+        # 角色侧写更新
+        updated_profiles = []
+        if self.arc_state["current_location"] == "movie_world":
+            profile_filename = f"{convert_name_to_filename(pov_character_name)}_profile.md"
+            profile_path = os.path.join(PROFILES_DIR, profile_filename)
+            existing_profile = ""
+            if os.path.exists(profile_path):
+                with open(profile_path, "r", encoding="utf-8") as f: existing_profile = f.read()
+            else:
+                existing_profile = f"# {pov_character_name} 的角色侧写\n\n- 在《{self.arc_state['current_movie_arc']['movie_name']}》篇章中首次出场。"
+
+            is_protagonist = (pov_character_name == self.arc_state["protagonist_name"])
+            profile_prompt = prompts.PROFILE_UPDATE_PROMPT.format(
+                character_name=pov_character_name, existing_profile=existing_profile, new_content=new_content
+            )
+            if not is_protagonist:
+                profile_prompt = profile_prompt.replace("背景慢速揭示 (仅限主角):", "")
+
+            updated_profile = call_gemini(profile_prompt, self.api_key)
+            if updated_profile:
+                if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
+                with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
+                updated_profiles.append(profile_path)
 
         next_chapter_number = len(re.findall(r"第 (\d+) 章", self.story_text)) + 1
         
@@ -316,31 +365,9 @@ class StoryManager:
             self.arc_state["real_world_summary"] = summary_after
 
         self._save_arc_state()
-        files_to_commit = [NOVEL_FILE, self.config['story_arc_file']]
+        files_to_commit = [NOVEL_FILE, self.config['story_arc_file']] + updated_profiles
         self.git.commit_and_push(files_to_commit, f"Chapter {next_chapter_number}: {chapter_subtitle}")
 
-        # --- 角色侧写更新 ---
-        if self.arc_state["current_location"] == "movie_world":
-            profile_filename = f"{convert_name_to_filename(pov_character_name)}_profile.md"
-            profile_path = os.path.join(PROFILES_DIR, profile_filename)
-            existing_profile = ""
-            if os.path.exists(profile_path):
-                with open(profile_path, "r", encoding="utf-8") as f: existing_profile = f.read()
-            else:
-                existing_profile = f"# {pov_character_name} 的角色侧写\n\n- 在《{self.arc_state['current_movie_arc']['movie_name']}》篇章中首次出场。"
-
-            is_protagonist = (pov_character_name == self.arc_state["protagonist_name"])
-            profile_prompt = prompts.PROFILE_UPDATE_PROMPT.format(
-                character_name=pov_character_name, existing_profile=existing_profile, new_content=new_content
-            )
-            if not is_protagonist:
-                profile_prompt = profile_prompt.replace("背景慢速揭示 (仅限主角):", "")
-
-            updated_profile = call_gemini(profile_prompt, self.api_key)
-            if updated_profile:
-                if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
-                with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
-                self.git.commit_and_push([profile_path], f"Update profile for {pov_character_name}")
 
     def run_cycle(self):
         """执行一个完整的创作循环。"""
@@ -352,9 +379,8 @@ class StoryManager:
             if not self.git.switch_to_branch("main"): return
         
         PROFILES_DIR = self.config['character_profiles_directory']
-        if not os.path.exists(PROFILES_DIR): os.makedirs(PROFILES_DIR)
+        os.makedirs(PROFILES_DIR, exist_ok=True)
         
-        # 重新加载状态和文本，以防上一次循环后有外部更改
         self.arc_state = self._load_arc_state()
         self.story_text = self._load_story_text()
 
@@ -382,4 +408,3 @@ class StoryManager:
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         
         print("\n本轮循环完成。")
-

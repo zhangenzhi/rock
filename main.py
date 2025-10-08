@@ -67,15 +67,15 @@ def main():
             # 循环调用 run_cycle 方法
             story_manager.run_cycle()
         except Exception as e:
-            print(f"在第 {i+1} 輪執行中發生嚴重錯誤: {e}")
+            print(f"在第 {i+1} 轮执行中发生严重错误: {e}")
         
         if i < total_runs - 1:
-            print(f"\n--- 第 {i + 1} 輪結束。程式將休眠5分鐘... ---")
-            time.sleep(300)
+            print(f"\n--- 第 {i + 1} 轮结束。程序将休眠30秒... ---")
+            time.sleep(30)
     
-    print(f"\n{'#'*10} 全部 {total_runs} 輪創作完成 {'#'*10}")
+    print(f"\n{'#'*10} 全部 {total_runs} 轮创作完成 {'#'*10}")
     # 最终完成后，切回setup分支
-    print("所有創作已完成，切回 'setup' 分支。")
+    print("所有创作已完成，切回 'setup' 分支。")
     git.switch_to_branch("setup")
 
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     if "--reset" in sys.argv:
         try:
             # 重置时也需要加载配置来获取文件路径
-            config_for_reset = load_config()
+            config_for_reset = load_config(cfg="infinite_fears.yaml")
             git_for_reset = GitManager(".")
             if full_reset(git_for_reset, config_for_reset):
                 print("完整重置流程结束。现在可以不带 '--reset' 参数来运行脚本，以开始一个全新的故事。")
@@ -95,4 +95,3 @@ if __name__ == "__main__":
 
     # 直接调用主函数
     main()
-
