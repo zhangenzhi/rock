@@ -22,7 +22,7 @@ class StoryManager:
     def _load_arc_state(self):
         """
         读取或初始化故事世界状态。
-        新增对 current_real_world_arc 的支持。
+        初始化时使用 'init_world' 状态。
         """
         ARC_STATE_FILE = self.config['story_arc_file']
         if os.path.exists(ARC_STATE_FILE):
@@ -34,15 +34,15 @@ class StoryManager:
                 if "current_real_world_arc" not in state:
                     state["current_real_world_arc"] = None
                 return state
-        # 初始化一个全新的故事状态
+        # 初始化一个全新的故事状态，位置为 init_world
         return {
             "protagonist_name": "江浩",
             "protagonist_tools": [],
-            "current_location": "real_world",
-            "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
+            "current_location": "init_world", # 核心修改：初始状态为 init_world
+            "real_world_summary": "故事的开端。主角江浩是一名中国的普通待业青年。",
             "current_movie_arc": None,
             "completed_movie_arcs": [],
-            "current_real_world_arc": None # 新增：用于追踪现实世界章节计划
+            "current_real_world_arc": None
         }
 
     def _save_arc_state(self):
@@ -198,11 +198,11 @@ class StoryManager:
         return arc, new_profile_paths
 
     # --- 章节生成模块 ---
-    def _generate_movie_chapter(self, movie_arc, summary_before):
+    def _generate_movie_chapter(self, movie_arc, summary_before, is_first_chapter_ever=False):
         """生成电影世界中的一个场景章节。"""
         scene_index = movie_arc["current_scene_index"]
         scene_plan = movie_arc["scenes"][scene_index]
-        chapter_subtitle, emotional_anchor = scene_plan["subtitle"], scene_plan.get("emotion", "未知")
+        chapter_subtitle, emotional_anchor = scene_plan["subtitle"], scene_plan.get("emotion_anchor", scene_plan.get("emotion", "未知")) # 兼容旧格式
         print(f"\n--- 本章主题: {chapter_subtitle} | 核心情绪: {emotional_anchor} ---")
 
         movie_plan_str = json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False, indent=2)
@@ -214,14 +214,17 @@ class StoryManager:
         pov_character_name = scene_plan.get("pov_character", self.arc_state["protagonist_name"])
         print(f"--- 架构师预设本章视点为: {pov_character_name} ---")
 
-        all_profiles_text = self._get_character_profiles_text(summary_before)
-
-        if scene_index == 0:
+        # 核心逻辑修改：根据是否为小说第一章决定是否加载人物侧写
+        if is_first_chapter_ever:
+            print("检测到为小说开篇，使用 FIRST_CHAPTER_PROMPT_TEMPLATE。")
+            all_profiles_text = "无" # 开篇没有任何人物侧写
             gen_prompt = prompts.FIRST_CHAPTER_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, movie_name=movie_arc['movie_name'], chapter_subtitle=chapter_subtitle,
                 emotional_anchor=emotional_anchor, meta_narrative_instruction=meta_instruction
             )
         else:
+            print("使用通用的 GENERATION_PROMPT_TEMPLATE。")
+            all_profiles_text = self._get_character_profiles_text(summary_before)
             gen_prompt = prompts.GENERATION_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, character_pov=pov_character_name, summary_text=summary_before,
                 character_profiles_text=all_profiles_text, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor,
@@ -283,7 +286,9 @@ class StoryManager:
             print(f"电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
             self.arc_state["current_location"] = "real_world"
             movie_arc["status"] = "completed"
-            self.arc_state["completed_movie_arcs"].append(movie_arc)
+            # 确保不重复添加
+            if not any(arc['movie_name'] == movie_arc['movie_name'] for arc in self.arc_state["completed_movie_arcs"]):
+                self.arc_state["completed_movie_arcs"].append(movie_arc)
             self.arc_state["current_movie_arc"] = None
             
             if movie_arc["movie_name"]:
@@ -332,9 +337,13 @@ class StoryManager:
         else: # decision == "MOVIE_WORLD"
             return self._start_new_movie_arc(summary_before)
 
-    def _start_new_movie_arc(self, summary_before):
+    def _start_new_movie_arc(self, summary_before, is_first_run=False):
         """开始一个新的电影世界。"""
-        print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
+        if is_first_run:
+            print("故事初始化，开始规划第一个电影世界...")
+        else:
+            print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
+        
         arc, new_profile_paths = self._plan_new_movie_arc()
         if not arc: return None, None, None
         
@@ -345,7 +354,7 @@ class StoryManager:
         self.git.commit_and_push([self.config['story_arc_file']] + new_profile_paths, f"Architect Plan (Movie): {arc['movie_name']}")
         
         arc["current_scene_index"] += 1
-        return self._generate_movie_chapter(arc, "无（这是电影世界的第一个场景）")
+        return self._generate_movie_chapter(arc, "无（这是小说的第一个场景）", is_first_chapter_ever=is_first_run)
     
     # --- 辅助与收尾模块 ---
     def _create_character_profiles(self, character_pool):
@@ -417,8 +426,10 @@ class StoryManager:
             if write_mode == 'a': f.write("\n\n---\n\n")
             f.write(header + new_content + "\n")
 
-        with open(NOVEL_FILE, "r", encoding="utf-8") as f: updated_story_text = f.read()
-        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=updated_story_text), self.api_key)
+        # 更新 story_text 实例变量，以便下一次 run_cycle 的判断
+        self.story_text = self.story_text + header + new_content
+
+        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=self.story_text), self.api_key)
         if summary_after:
              self.arc_state["real_world_summary"] = summary_after
 
@@ -443,7 +454,13 @@ class StoryManager:
         
         new_content, pov_character_name, chapter_subtitle = None, None, None
 
-        if self.arc_state["current_location"] == "movie_world":
+        # 核心修改：为 init_world 添加专门的处理分支
+        if self.arc_state["current_location"] == "init_world":
+            print("\n--- 检测到故事初始化状态 'init_world' ---")
+            # 直接开始第一个电影世界，跳过导演决策
+            new_content, pov_character_name, chapter_subtitle = self._start_new_movie_arc(summary_before, is_first_run=True)
+
+        elif self.arc_state["current_location"] == "movie_world":
             new_content, pov_character_name, chapter_subtitle = self._handle_movie_arc_progression(summary_before)
             if not new_content: # 电影世界结束，进入决策流程
                  new_content, pov_character_name, chapter_subtitle = self._decide_and_execute_next_step(summary_before)
