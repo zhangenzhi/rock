@@ -22,24 +22,21 @@ class StoryManager:
     def _load_arc_state(self):
         """
         读取或初始化故事世界状态。
-        初始化时使用 'init_world' 状态。
         """
         ARC_STATE_FILE = self.config['story_arc_file']
         if os.path.exists(ARC_STATE_FILE):
             with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
                 state = json.load(f)
-                # 向后兼容，确保旧的状态文件有必要的新字段
                 if "completed_movie_arcs" not in state:
                     state["completed_movie_arcs"] = []
                 if "current_real_world_arc" not in state:
                     state["current_real_world_arc"] = None
                 return state
-        # 初始化一个全新的故事状态，位置为 init_world
         return {
             "protagonist_name": "江浩",
             "protagonist_tools": [],
-            "current_location": "init_world", # 核心修改：初始状态为 init_world
-            "real_world_summary": "故事的开端。主角江浩是一名中国的普通待业青年。",
+            "current_location": "real_world",
+            "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
             "current_movie_arc": None,
             "completed_movie_arcs": [],
             "current_real_world_arc": None
@@ -77,7 +74,7 @@ class StoryManager:
     def _call_gemini_and_parse_json(self, prompt, max_retries=3):
         """调用 Gemini API 期望获得JSON响应，并包含校验和重试逻辑。"""
         for attempt in range(max_retries):
-            print(f"正在尝试第 {attempt + 1}/{max_retries} 次生成和解析JSON...")
+            # print(f"正在尝试第 {attempt + 1}/{max_retries} 次生成和解析JSON...")
             json_str = call_gemini(prompt, self.api_key)
             if not json_str:
                 print("API调用未能返回内容，将重试...")
@@ -89,7 +86,7 @@ class StoryManager:
                     raise json.JSONDecodeError("响应中未找到有效的JSON结构。", json_str, 0)
                 cleaned_json_str = match.group(0)
                 json_obj = json.loads(cleaned_json_str)
-                print("JSON生成和解析成功。")
+                # print("JSON生成和解析成功。")
                 return json_obj, cleaned_json_str
             except json.JSONDecodeError as e:
                 print(f"警告：JSON解析失败: {e}")
@@ -99,11 +96,24 @@ class StoryManager:
                     print("已达到最大重试次数，无法获取有效的JSON。")
                     print("\n--- DEBUG: 最终解析失败的JSON字符串 ---\n" + json_str + "\n---------------------------------\n")
         return None, None
+    
+    def _get_agent_confirmation(self, agent_role, agent_output):
+        """(新) 调用AI助理获取人性化的确认信息"""
+        if isinstance(agent_output, dict):
+            agent_output = json.dumps(agent_output, ensure_ascii=False, indent=2)
+        
+        prompt = prompts.AGENT_CONFIRMATION_PROMPT.format(
+            agent_role=agent_role,
+            agent_output=agent_output
+        )
+        confirmation = call_gemini(prompt, self.api_key)
+        if confirmation:
+            print(f"\n{confirmation}\n")
 
     # --- 规划模块 ---
     def _plan_new_movie_arc(self):
         """规划一个全新的电影世界大章节。"""
-        print("\n--- 正在规划新的电影世界 ---")
+        print("\n--- [电影世界架构师] 开始规划新的电影世界 ---")
         movie_name = call_gemini(prompts.MOVIE_SELECTION_PROMPT, self.api_key)
         if not movie_name: return None, []
         
@@ -112,16 +122,18 @@ class StoryManager:
         )
         if not draft_plan_data: return None, []
         
-        print("\n--- 开始电影剧情大纲审稿与重写流程 ---")
         polished_plan_json_str = draft_plan_json_str
         for i in range(self.config['rewrite_cycles']):
-            print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮大纲打磨 ---")
+            print(f"--- [总编] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮电影大纲审查 ---")
             review_prompt = prompts.ARCHITECT_REVIEW_PROMPT.format(movie_plan_draft=polished_plan_json_str)
             feedback = call_gemini(review_prompt, self.api_key)
             if not feedback:
                 print("大纲审稿失败，跳过本轮重写。")
                 continue
-            print(f"--- 总编反馈 ---\n{feedback}\n----------------")
+            
+            self._get_agent_confirmation("总编", feedback)
+            
+            print(f"--- [电影世界架构师] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮大纲重写 ---")
             rewrite_prompt = prompts.ARCHITECT_REWRITE_PROMPT.format(original_plan=polished_plan_json_str, feedback=feedback)
             rewritten_plan_data, rewritten_plan_json_str = self._call_gemini_and_parse_json(rewrite_prompt)
             if not rewritten_plan_data:
@@ -132,6 +144,8 @@ class StoryManager:
         final_plan_data, _ = self._call_gemini_and_parse_json(f"请格式化并返回这个JSON:\n{polished_plan_json_str}")
         if not final_plan_data: return None, []
 
+        self._get_agent_confirmation("电影世界架构师", final_plan_data)
+
         scenes = final_plan_data.get("scenes", [])
         arc = {
             "movie_name": movie_name, "status": "active", "current_scene_index": -1,
@@ -140,38 +154,33 @@ class StoryManager:
         }
         
         new_profile_paths = self._create_character_profiles(final_plan_data.get("character_pool", []))
-        print(f"电影《{movie_name}》规划完成，共 {len(arc['scenes'])} 个场景。")
         return arc, new_profile_paths
 
     def _plan_real_world_arc(self, summary_before):
-        """(已升级) 为现实世界规划章节，并加入审稿重写循环。"""
-        print("\n--- 架构师正在规划接下来的现实世界主线剧情 ---")
+        """为现实世界规划章节，并加入审稿重写循环。"""
+        print("\n--- [悬疑剧编剧] 开始规划现实世界主线 ---")
         last_movie = self.arc_state["completed_movie_arcs"][-1] if self.arc_state["completed_movie_arcs"] else {"movie_name": "无"}
         
-        # 1. 生成初稿
         draft_prompt = prompts.REAL_WORLD_ARC_ANALYSIS_PROMPT.format(
             real_world_summary=summary_before,
             protagonist_tools=json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
             last_movie_name=last_movie['movie_name']
         )
         draft_plan_data, draft_plan_json_str = self._call_gemini_and_parse_json(draft_prompt)
-        if not draft_plan_data:
-            print("错误：现实世界章节规划初稿生成失败。")
-            return None, []
+        if not draft_plan_data: return None, []
 
-        # 2. 开始审稿与重写循环
-        print("\n--- 开始现实世界主线大纲审稿与重写流程 ---")
         polished_plan_json_str = draft_plan_json_str
         for i in range(self.config['rewrite_cycles']):
-            print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮现实大纲打磨 ---")
+            print(f"--- [悬疑剧总编] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮现实大纲审查 ---")
             review_prompt = prompts.REAL_WORLD_ARC_REVIEW_PROMPT.format(real_world_plan_draft=polished_plan_json_str)
             feedback = call_gemini(review_prompt, self.api_key)
             if not feedback:
                 print("现实大纲审稿失败，跳过本轮重写。")
                 continue
             
-            print(f"--- 总编反馈 ---\n{feedback}\n----------------")
+            self._get_agent_confirmation("悬疑剧总编", feedback)
             
+            print(f"--- [悬疑剧编剧] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮大纲重写 ---")
             rewrite_prompt = prompts.REAL_WORLD_ARC_REWRITE_PROMPT.format(original_plan=polished_plan_json_str, feedback=feedback)
             rewritten_plan_data, rewritten_plan_json_str = self._call_gemini_and_parse_json(rewrite_prompt)
             if not rewritten_plan_data:
@@ -179,11 +188,10 @@ class StoryManager:
                 break
             polished_plan_json_str = rewritten_plan_json_str
 
-        # 3. 解析最终版本
         final_plan_data, _ = self._call_gemini_and_parse_json(f"请格式化并返回这个JSON:\n{polished_plan_json_str}")
-        if not final_plan_data:
-            print("错误：无法解析最终的现实世界章节规划。")
-            return None, []
+        if not final_plan_data: return None, []
+
+        self._get_agent_confirmation("悬疑剧编剧", final_plan_data)
         
         scenes = final_plan_data.get("scenes", [])
         arc = {
@@ -193,17 +201,15 @@ class StoryManager:
         }
         self.arc_state["current_real_world_arc"] = arc
         new_profile_paths = self._create_character_profiles(final_plan_data.get("character_pool", []))
-        
-        print(f"现实世界章节《{arc['arc_title']}》规划完成，共 {len(scenes)} 个场景。")
         return arc, new_profile_paths
 
     # --- 章节生成模块 ---
-    def _generate_movie_chapter(self, movie_arc, summary_before, is_first_chapter_ever=False):
+    def _generate_movie_chapter(self, movie_arc, summary_before):
         """生成电影世界中的一个场景章节。"""
         scene_index = movie_arc["current_scene_index"]
         scene_plan = movie_arc["scenes"][scene_index]
-        chapter_subtitle, emotional_anchor = scene_plan["subtitle"], scene_plan.get("emotion_anchor", scene_plan.get("emotion", "未知")) # 兼容旧格式
-        print(f"\n--- 本章主题: {chapter_subtitle} | 核心情绪: {emotional_anchor} ---")
+        chapter_subtitle, emotional_anchor = scene_plan["subtitle"], scene_plan.get("emotion", "未知")
+        print(f"\n--- [小说家] 开始创作章节: {chapter_subtitle} | 核心情绪: {emotional_anchor} ---")
 
         movie_plan_str = json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False, indent=2)
         meta_foreshadowing = movie_arc.get('movie_plan', {}).get('meta_narrative_foreshadowing', {})
@@ -212,19 +218,16 @@ class StoryManager:
             meta_instruction = f"**演绎元叙事感:** {meta_foreshadowing.get('content', '')}"
 
         pov_character_name = scene_plan.get("pov_character", self.arc_state["protagonist_name"])
-        print(f"--- 架构师预设本章视点为: {pov_character_name} ---")
+        print(f"--- 预设视点为: {pov_character_name} ---")
 
-        # 核心逻辑修改：根据是否为小说第一章决定是否加载人物侧写
-        if is_first_chapter_ever:
-            print("检测到为小说开篇，使用 FIRST_CHAPTER_PROMPT_TEMPLATE。")
-            all_profiles_text = "无" # 开篇没有任何人物侧写
+        all_profiles_text = self._get_character_profiles_text(summary_before)
+
+        if scene_index == 0:
             gen_prompt = prompts.FIRST_CHAPTER_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, movie_name=movie_arc['movie_name'], chapter_subtitle=chapter_subtitle,
                 emotional_anchor=emotional_anchor, meta_narrative_instruction=meta_instruction
             )
         else:
-            print("使用通用的 GENERATION_PROMPT_TEMPLATE。")
-            all_profiles_text = self._get_character_profiles_text(summary_before)
             gen_prompt = prompts.GENERATION_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, character_pov=pov_character_name, summary_text=summary_before,
                 character_profiles_text=all_profiles_text, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor,
@@ -235,16 +238,18 @@ class StoryManager:
         draft_content = call_gemini(gen_prompt, self.api_key)
         if not draft_content: return None, None, None
 
-        # --- 章节打磨循环 ---
         polished_content = draft_content
         for i in range(self.config['rewrite_cycles']):
-            print(f"\n--- 第 {i + 1} / {self.config['rewrite_cycles']} 轮章节打磨 ---")
+            print(f"\n--- [文学编辑] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮章节审查 ---")
             review_prompt = prompts.REVIEW_PROMPT_TEMPLATE.format(chapter_text=polished_content, movie_plan=movie_plan_str, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor)
             feedback = call_gemini(review_prompt, self.api_key)
             if not feedback:
                 print("审稿失败，跳过本轮重写。")
                 continue
-            print(f"--- 编辑反馈 ---\n{feedback}\n----------------")
+            
+            self._get_agent_confirmation("文学编辑", feedback)
+
+            print(f"--- [小说家] 开始第 {i + 1} / {self.config['rewrite_cycles']} 轮章节重写 ---")
             rewrite_prompt = prompts.REWRITE_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, summary_text=summary_before, character_profiles_text=all_profiles_text,
                 protagonist_tools=json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
@@ -264,7 +269,7 @@ class StoryManager:
         emotional_anchor = scene_plan.get("emotion_anchor", "未知")
         pov_character_name = scene_plan.get("pov_character", self.arc_state["protagonist_name"])
 
-        print(f"\n--- 现实世界章节: {chapter_subtitle} | 视点: {pov_character_name} ---")
+        print(f"\n--- [悬疑小说家] 开始创作现实章节: {chapter_subtitle} | 视点: {pov_character_name} ---")
 
         gen_prompt = prompts.REAL_WORLD_GENERATION_PROMPT.format(
             summary_text=summary_before,
@@ -283,25 +288,22 @@ class StoryManager:
         movie_arc = self.arc_state["current_movie_arc"]
         
         if movie_arc["current_scene_index"] >= movie_arc["total_scenes"] - 1:
-            print(f"电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
+            print(f"\n电影《{movie_arc['movie_name']}》已完结，回归现实世界...")
             self.arc_state["current_location"] = "real_world"
             movie_arc["status"] = "completed"
-            # 确保不重复添加
-            if not any(arc['movie_name'] == movie_arc['movie_name'] for arc in self.arc_state["completed_movie_arcs"]):
-                self.arc_state["completed_movie_arcs"].append(movie_arc)
+            self.arc_state["completed_movie_arcs"].append(movie_arc)
             self.arc_state["current_movie_arc"] = None
             
             if movie_arc["movie_name"]:
-                new_tool, _ = self._call_gemini_and_parse_json(prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']))
-                if new_tool and isinstance(new_tool, dict):
-                    self.arc_state["protagonist_tools"].append(new_tool)
-                    print(f"主角获得新工具: {new_tool.get('tool_name')}")
+                tool_data, _ = self._call_gemini_and_parse_json(prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']))
+                if tool_data and isinstance(tool_data, dict):
+                    self.arc_state["protagonist_tools"].append(tool_data)
+                    self._get_agent_confirmation("道具设计师", tool_data)
             
-            return None, None, None # 返回空，表示一个流程结束，主循环将调用导演
+            return None, None, None
         else:
             movie_arc["current_scene_index"] += 1
             scene_plan = movie_arc["scenes"][movie_arc["current_scene_index"]]
-            print(f"\n--- 当前电影:《{movie_arc['movie_name']}》 | 场景 {scene_plan.get('scene_number', movie_arc['current_scene_index'] + 1)} ---")
             return self._generate_movie_chapter(movie_arc, summary_before)
 
     def _handle_real_world_arc_progression(self, summary_before):
@@ -312,7 +314,7 @@ class StoryManager:
 
     def _decide_and_execute_next_step(self, summary_before):
         """'故事导演'进行决策，并执行下一步动作。"""
-        print("\n--- '故事导演' 正在决策下一步剧情走向 ---")
+        print("\n--- [故事导演] 开始决策下一步剧情走向 ---")
         
         completed_movies_list = [arc['movie_name'] for arc in self.arc_state['completed_movie_arcs']]
         prompt = prompts.NEXT_STEP_DECISION_PROMPT.format(
@@ -326,7 +328,7 @@ class StoryManager:
             print("导演决策失败，默认继续现实世界剧情。")
             decision_data = {"decision": "REAL_WORLD", "reasoning": "决策失败，默认选项。"}
 
-        print(f"--- 导演决策: {decision_data['decision']} | 理由: {decision_data['reasoning']} ---")
+        self._get_agent_confirmation("故事导演", decision_data)
 
         if decision_data["decision"] == "REAL_WORLD":
             arc, new_profile_paths = self._plan_real_world_arc(summary_before)
@@ -337,13 +339,8 @@ class StoryManager:
         else: # decision == "MOVIE_WORLD"
             return self._start_new_movie_arc(summary_before)
 
-    def _start_new_movie_arc(self, summary_before, is_first_run=False):
+    def _start_new_movie_arc(self, summary_before):
         """开始一个新的电影世界。"""
-        if is_first_run:
-            print("故事初始化，开始规划第一个电影世界...")
-        else:
-            print("现实世界剧情暂告一段落，准备进入新的恐怖电影...")
-        
         arc, new_profile_paths = self._plan_new_movie_arc()
         if not arc: return None, None, None
         
@@ -354,11 +351,13 @@ class StoryManager:
         self.git.commit_and_push([self.config['story_arc_file']] + new_profile_paths, f"Architect Plan (Movie): {arc['movie_name']}")
         
         arc["current_scene_index"] += 1
-        return self._generate_movie_chapter(arc, "无（这是小说的第一个场景）", is_first_chapter_ever=is_first_run)
+        return self._generate_movie_chapter(arc, "无（这是电影世界的第一个场景）")
     
     # --- 辅助与收尾模块 ---
     def _create_character_profiles(self, character_pool):
         """根据规划创建角色档案文件。"""
+        if not character_pool: return []
+        print("--- [档案员] 正在创建新角色的档案 ---")
         new_profile_paths = []
         PROFILES_DIR = self.config['character_profiles_directory']
         os.makedirs(PROFILES_DIR, exist_ok=True)
@@ -371,6 +370,7 @@ class StoryManager:
                 with open(profile_path, "w", encoding="utf-8") as f:
                     f.write(initial_profile)
                 new_profile_paths.append(profile_path)
+                print(f"  - 已创建角色 '{char_name}' 的档案。")
         return new_profile_paths
 
     def _get_character_profiles_text(self, summary_text):
@@ -380,7 +380,7 @@ class StoryManager:
             return "本章没有特定角色的侧写信息。"
         
         character_names = [name.strip() for name in character_names_str.split(',') if name.strip()]
-        print(f"识别到出场人物: {character_names}")
+        print(f"--- [情报分析师] 识别到出场人物: {character_names} ---")
         profile_contents = []
         for name in character_names:
             profile_path = os.path.join(self.config['character_profiles_directory'], f"{convert_name_to_filename(name)}_profile.md")
@@ -391,7 +391,7 @@ class StoryManager:
 
     def _finalize_chapter(self, new_content, pov_character_name, chapter_subtitle):
         """将最终章节内容写入文件、更新角色档案并提交到Git。"""
-        print("\n--- 正在定稿本章内容 ---")
+        print("\n--- [档案员] 正在定稿并归档本章内容 ---")
         NOVEL_FILE = self.config['novel_file_name']
         PROFILES_DIR = self.config['character_profiles_directory']
         
@@ -400,6 +400,7 @@ class StoryManager:
         if summary_of_new_content:
             character_names_str = call_gemini(prompts.CHARACTER_IDENTIFICATION_PROMPT.format(summary_text=summary_of_new_content), self.api_key)
             if character_names_str and character_names_str.lower() != '无':
+                print("--- [心理分析师] 正在更新本章出场角色的侧写 ---")
                 for char_name in [name.strip() for name in character_names_str.split(',') if name.strip()]:
                     profile_path = os.path.join(PROFILES_DIR, f"{convert_name_to_filename(char_name)}_profile.md")
                     existing_profile = ""
@@ -411,6 +412,7 @@ class StoryManager:
                     if updated_profile:
                         with open(profile_path, "w", encoding="utf-8") as f: f.write(updated_profile)
                         updated_profiles_paths.append(profile_path)
+                        print(f"  - 已更新角色 '{char_name}' 的侧写。")
 
         next_chapter_number = len(re.findall(r"# 第 (\d+) 章", self.story_text)) + 1
         location_info = "现实世界"
@@ -425,13 +427,14 @@ class StoryManager:
         with open(NOVEL_FILE, write_mode, encoding="utf-8") as f:
             if write_mode == 'a': f.write("\n\n---\n\n")
             f.write(header + new_content + "\n")
+        print(f"  - 章节 {next_chapter_number} 已写入主文件。")
 
-        # 更新 story_text 实例变量，以便下一次 run_cycle 的判断
-        self.story_text = self.story_text + header + new_content
-
-        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=self.story_text), self.api_key)
+        with open(NOVEL_FILE, "r", encoding="utf-8") as f: updated_story_text = f.read()
+        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=updated_story_text), self.api_key)
         if summary_after:
              self.arc_state["real_world_summary"] = summary_after
+             self._get_agent_confirmation("故事分析师", f"已生成新的全局摘要，当前核心悬念是：{summary_after.split('。')[0]}。")
+
 
         self._save_arc_state()
         
@@ -450,36 +453,27 @@ class StoryManager:
         self.story_text = self._load_story_text()
 
         summary_before = self.arc_state.get("real_world_summary", "无（这是故事的开篇）")
-        print(f"\n--- 加载当前故事摘要 ---\n{summary_before}\n--------------------")
+        print(f"\n--- [系统] 加载当前故事摘要 ---\n{summary_before}\n--------------------")
         
         new_content, pov_character_name, chapter_subtitle = None, None, None
 
-        # 核心修改：为 init_world 添加专门的处理分支
-        if self.arc_state["current_location"] == "init_world":
-            print("\n--- 检测到故事初始化状态 'init_world' ---")
-            # 直接开始第一个电影世界，跳过导演决策
-            new_content, pov_character_name, chapter_subtitle = self._start_new_movie_arc(summary_before, is_first_run=True)
-
-        elif self.arc_state["current_location"] == "movie_world":
+        if self.arc_state["current_location"] == "movie_world":
             new_content, pov_character_name, chapter_subtitle = self._handle_movie_arc_progression(summary_before)
-            if not new_content: # 电影世界结束，进入决策流程
+            if not new_content:
                  new_content, pov_character_name, chapter_subtitle = self._decide_and_execute_next_step(summary_before)
         
         elif self.arc_state["current_location"] == "real_world":
             rw_arc = self.arc_state.get("current_real_world_arc")
             if rw_arc and rw_arc["current_scene_index"] < rw_arc["total_scenes"] - 1:
-                # 继续执行已有的现实世界计划
                 new_content, pov_character_name, chapter_subtitle = self._handle_real_world_arc_progression(summary_before)
             else:
-                # 现实计划不存在或已结束，调用导演决策
-                if rw_arc: self.arc_state["current_real_world_arc"] = None # 清理已完成的计划
+                if rw_arc: self.arc_state["current_real_world_arc"] = None
                 new_content, pov_character_name, chapter_subtitle = self._decide_and_execute_next_step(summary_before)
 
         if not new_content:
-            print("本轮循环为状态转换或规划，未生成最终章节。请检查日志。")
+            print("\n本轮循环为状态转换或规划，未生成最终章节。循环结束。")
             return
             
         print("\n--- 章节生成完毕 ---")
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         print("\n本轮循环完成。")
-
