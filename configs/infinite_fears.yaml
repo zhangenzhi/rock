@@ -9,3 +9,8 @@ novel_file_name: "infinite_fears.md"
 character_profiles_directory: "output/characters"
 story_arc_file: "output/story_arc.json"
 rewrite_cycles: 3
+
+# Git Settings
+# Set to false to disable automatic git push, useful for local development.
+# Only commits will be made locally.
+git_push_enabled: false

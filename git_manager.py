@@ -3,8 +3,9 @@ import subprocess
 
 class GitManager:
     """封装所有Git操作的模块"""
-    def __init__(self, repo_path="."):
+    def __init__(self, repo_path=".", config=None):
         self.repo_path = repo_path
+        self.config = config if config else {} # 存储配置信息
         if not os.path.isdir(os.path.join(repo_path, '.git')):
             raise EnvironmentError("错误：当前目录不是一个有效的Git仓库。")
 
@@ -42,7 +43,12 @@ class GitManager:
     def delete_branch(self, branch_name):
         print(f"正在删除分支: {branch_name}")
         self._run_command(["git", "branch", "-D", branch_name], suppress_errors=True)
-        self._run_command(["git", "push", "origin", "--delete", branch_name], suppress_errors=True)
+        # 仅在启用 push 时才执行远程删除
+        if self.config.get('git_push_enabled', True):
+            self._run_command(["git", "push", "origin", "--delete", branch_name], suppress_errors=True)
+        else:
+            print("Git push 已禁用，跳过远程分支删除。")
+
 
     def switch_to_branch(self, branch_name, create_if_not_exists=False):
         if self.get_current_branch() == branch_name: return True
@@ -57,10 +63,16 @@ class GitManager:
     def commit_and_push(self, file_paths, message):
         branch = self.get_current_branch()
         if not branch: return
-        print(f"\n--- 正在向分支 '{branch}' 提交并推送 ---")
+        print(f"\n--- 正在向分支 '{branch}' 提交 ---")
         for file_path in file_paths:
              if os.path.exists(file_path):
                 self._run_command(["git", "add", file_path])
         self._run_command(["git", "commit", "-m", message])
-        self._run_command(["git", "push", "--set-upstream", "origin", branch])
-        print(f"成功将更改推送到 origin/{branch}")
+        
+        # 核心修改：根据配置决定是否 push
+        if self.config.get('git_push_enabled', True):
+            print(f"--- 正在向分支 '{branch}' 推送 ---")
+            self._run_command(["git", "push", "--set-upstream", "origin", branch])
+            print(f"成功将更改推送到 origin/{branch}")
+        else:
+            print("Git push 已在配置中禁用，跳过推送步骤。")

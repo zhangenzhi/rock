@@ -45,7 +45,8 @@ def main():
     """主执行函数，负责管理整个创作循环。"""
     
     config = load_config(cfg="infinite_fears.yaml")
-    git = GitManager(".") 
+    # 核心修改：将配置信息传递给 GitManager
+    git = GitManager(".", config) 
 
     print("--- 正在进行启动检查 ---")
     if git.get_current_branch() != "setup":
@@ -94,7 +95,8 @@ if __name__ == "__main__":
     if "--reset" in sys.argv:
         try:
             config_for_reset = load_config(cfg="infinite_fears.yaml")
-            git_for_reset = GitManager(".")
+            # 核心修改：将配置信息传递给 GitManager
+            git_for_reset = GitManager(".", config_for_reset)
             if full_reset(git_for_reset, config_for_reset):
                 print("完整重置流程结束。现在可以不带 '--reset' 参数来运行脚本，以开始一个全新的故事。")
         except Exception as e:
@@ -102,4 +104,3 @@ if __name__ == "__main__":
         exit()
 
     main()
-
