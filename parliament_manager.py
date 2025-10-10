@@ -36,7 +36,8 @@ class ParliamentManager:
                         except json.JSONDecodeError:
                             self.logger.log_error(f"议会准备期间，无法解析角色侧写: {filepath}")
             
-            if not all_profiles: return "（暂无角色侧写文件。）", data_source
+            if not all_profiles:
+                return "（暂无角色侧写文件。）", data_source
             self.logger.log_read(role, profiles_dir, "为议会准备所有角色侧写")
             return "\n".join(all_profiles), data_source
 
@@ -48,7 +49,6 @@ class ParliamentManager:
             with open(novel_file, 'r', encoding='utf-8') as f:
                 try:
                     novel_data = json.load(f)
-                    # 返回最近的章节作为参考
                     last_chapters = novel_data.get("chapters", [])[-2:]
                     self.logger.log_read(role, novel_file, "为议会准备最新章节内容")
                     return json.dumps(last_chapters, ensure_ascii=False, indent=2), data_source
@@ -70,13 +70,21 @@ class ParliamentManager:
             self.logger.log_error(f"JSON解析失败 for {agent_name} ({purpose}). Error: {e}. Raw text: {response_text}")
             return None
 
+    def _get_agent_confirmation(self, agent_role, agent_output):
+        """调用AI助理获取人性化的确认信息"""
+        output_str = json.dumps(agent_output, ensure_ascii=False, indent=2)
+        prompt = prompt.AGENT_CONFIRMATION_PROMPT.format(agent_role=agent_role, agent_output=output_str)
+        # This call doesn't need schema validation
+        confirmation_text = call_gemini(prompt, self.api_key, self.logger, "AI助理", f"为 {agent_role} 的输出生成人性化确认信息")
+        if confirmation_text:
+            print(f"\n{confirmation_text}\n")
+
     def hold_meeting(self, arc_state, completed_arc):
         """
         在电影或现实世界大章节完成后，召开议会。
         """
         print("\n" + "#"*15 + " 议会开始：审阅已完成章节并规划未来 " + "#"*15)
 
-        # 核心修改：兼容电影和现实世界两种类型的章节
         arc_name = completed_arc.get('movie_name') or completed_arc.get('arc_title', '未知章节')
         summary = arc_state.get("real_world_summary", {"summary": "无"})
         
@@ -117,10 +125,10 @@ class ParliamentManager:
         self.logger.log_write("故事导演", minutes_filepath, f"保存《{arc_name}》的会议纪要")
 
         summary_prompt = prompts.PARLIAMENT_SUMMARY_PROMPT.format(meeting_minutes=json.dumps(meeting_minutes, ensure_ascii=False))
-        roadmap_data = self._call_api_with_schema("执行制片人", "从会议纪要中提炼路线图", summary_prompt, schemas.PARLIAMENT_SUMMARY_PROMPT)
+        roadmap_data = self._call_api_with_schema("执行制片人", "从会议纪要中提炼路线图", summary_prompt, schemas.PARLIAMENT_SUMMARY_SCHEMA)
 
         if roadmap_data:
-            call_gemini(prompt.AGENT_CONFIRMATION_PROMPT.format(agent_role="执行制片人", agent_output=json.dumps(roadmap_data, ensure_ascii=False)), self.api_key, self.logger, "AI助理", "生成路线图确认信息")
+            self._get_agent_confirmation("执行制片人", roadmap_data)
         else:
             self.logger.log_error("未能从会议纪要中提炼出有效的执行路线图。")
         
