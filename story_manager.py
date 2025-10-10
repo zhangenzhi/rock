@@ -87,7 +87,7 @@ class StoryManager:
     
     def _get_agent_confirmation(self, agent_role, agent_output):
         output_str = json.dumps(agent_output, ensure_ascii=False, indent=2)
-        prompt = prompt.AGENT_CONFIRMATION_PROMPT.format(agent_role=agent_role, agent_output=output_str)
+        prompt = prompts.AGENT_CONFIRMATION_PROMPT.format(agent_role=agent_role, agent_output=output_str)
         confirmation_text = call_gemini(prompt, self.api_key, self.logger, "AI助理", f"为 {agent_role} 的输出生成人性化确认信息")
         if confirmation_text:
             print(f"\n{confirmation_text}\n")

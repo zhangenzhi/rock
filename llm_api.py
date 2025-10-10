@@ -6,7 +6,7 @@ def call_gemini(prompt, api_key, logger, agent_name, purpose, response_schema=No
     (已升级) 调用 Gemini API 并获取生成的内容。
     支持通过 responseSchema 强制执行JSON输出。
     """
-    print(f"\n--- [API Call] Agent: {agent_name} | Purpose: {purpose} ---")
+    # print(f"\n--- [API Call] Agent: {agent_name} | Purpose: {purpose} ---")
     if logger:
         logger.log_api_call(agent_name, purpose)
     
