@@ -14,14 +14,13 @@ def load_config(cfg="book_names.yaml"):
         print("请在新创建的文件中填入您的 Gemini API 密钥后重新运行。")
         default_config = {
             "gemini_api_key": "在此处粘贴您的GEMINI_API_KEY",
-            "novel_file_name": "无限恐怖.txt",
-            "character_profiles_directory": "characters",
-            "story_arc_file": "story_arc.json",
-            "rewrite_cycles": 3
+            "novel_file_name": "output/infinite_fears.json",
+            "character_profiles_directory": "output/characters",
+            "story_arc_file": "output/story_arc.json",
+            "rewrite_cycles": 2 
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             yaml.dump(default_config, f, allow_unicode=True, sort_keys=False)
-        # 退出以便用户填写配置
         exit()
 
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:

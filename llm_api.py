@@ -1,24 +1,34 @@
 import requests
 import json
 
-def call_gemini(prompt, api_key, logger, agent_name, purpose):
+def call_gemini(prompt, api_key, logger, agent_name, purpose, response_schema=None):
     """
     (已升级) 调用 Gemini API 并获取生成的内容。
-    现在会记录调用者(Agent)和其目的。
+    支持通过 responseSchema 强制执行JSON输出。
     """
-    # --- 核心修改：在终端打印并写入日志 ---
     print(f"\n--- [API Call] Agent: {agent_name} | Purpose: {purpose} ---")
     if logger:
         logger.log_api_call(agent_name, purpose)
-    # ------------------------------------
     
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
     
     headers = {'Content-Type': 'application/json'}
     
+    generation_config = {
+        "temperature": 0.7,
+        "topK": 1,
+        "topP": 1,
+        "maxOutputTokens": 8192
+    }
+    
+    # --- 核心修改：启用JSON Schema模式 ---
+    if response_schema:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
+
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "topK": 1, "topP": 1, "maxOutputTokens": 8192},
+        "generationConfig": generation_config,
         "safetySettings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -49,5 +59,10 @@ def call_gemini(prompt, api_key, logger, agent_name, purpose):
         print(f"错误：Gemini API 请求失败: {e}")
         if hasattr(e, 'response') and e.response:
             print(f"响应状态码: {e.response.status_code}")
-            print(f"响应内容: {e.response.text}")
+            try:
+                error_details = e.response.json()
+                print(f"响应内容: {json.dumps(error_details, ensure_ascii=False, indent=2)}")
+            except json.JSONDecodeError:
+                print(f"响应内容 (非JSON): {e.response.text}")
         return None
+
