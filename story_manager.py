@@ -4,6 +4,7 @@ import time
 import shutil
 from datetime import datetime
 import prompts
+import prompt_manager
 import schemas
 from llm_api import call_gemini
 from utils import convert_name_to_filename
@@ -32,21 +33,29 @@ class StoryManager:
                 print(f"环境清理完成: 已删除 '{output_dir}' 目录及其所有内容。")
             except Exception as e:
                 print(f"清理环境时出错: {e}")
-        self.logger = LoggerManager() # Re-initialize logger to ensure dir exists
+        self.logger = LoggerManager()
 
     def _load_arc_state(self):
         ARC_STATE_FILE = self.config['story_arc_file']
         if os.path.exists(ARC_STATE_FILE):
             self.logger.log_read("StoryManager", ARC_STATE_FILE, "加载故事世界状态")
             with open(ARC_STATE_FILE, 'r', encoding='utf-8') as f:
-                state = json.load(f)
-                if "completed_movie_arcs" not in state: state["completed_movie_arcs"] = []
-                if "current_real_world_arc" not in state: state["current_real_world_arc"] = None
-                return state
+                try:
+                    state = json.load(f)
+                    if "completed_movie_arcs" not in state: state["completed_movie_arcs"] = []
+                    if "current_real_world_arc" not in state: state["current_real_world_arc"] = None
+                    return state
+                except json.JSONDecodeError:
+                    self.logger.log_error(f"无法解析 story_arc 文件: {ARC_STATE_FILE}。将创建新状态。")
+                    return self._get_initial_arc_state()
+        return self._get_initial_arc_state()
+
+    def _get_initial_arc_state(self):
         return {
             "protagonist_name": "江浩", "protagonist_tools": [], "current_location": "init_world",
             "real_world_summary": {"summary": "故事的开端。主角江浩是一名中国的普通待业青年。", "next_motivation": "开始第一次电影世界冒险"},
-            "current_movie_arc": None, "completed_movie_arcs": [], "current_real_world_arc": None
+            "current_movie_arc": None, "completed_movie_arcs": [], "current_real_world_arc": None,
+            "last_completed_arc": None # 用于会议
         }
 
     def _save_arc_state(self):
@@ -64,6 +73,7 @@ class StoryManager:
                 try:
                     return json.load(f)
                 except (json.JSONDecodeError, FileNotFoundError):
+                    self.logger.log_error(f"无法解析小说文件: {NOVEL_FILE}。将创建新数据。")
                     return {"chapters": []}
         return {"chapters": []}
 
@@ -73,18 +83,15 @@ class StoryManager:
         try:
             return json.loads(response_text)
         except json.JSONDecodeError as e:
-            print(f"错误: Gemini返回的不是有效的JSON。 {e}\n原始返回: {response_text}")
+            self.logger.log_error(f"JSON解析失败 for {agent_name} ({purpose}). Error: {e}. Raw text: {response_text}")
             return None
     
-    def _call_api(self, agent_name, purpose, prompt):
-        return call_gemini(prompt, self.api_key, self.logger, agent_name, purpose)
-
     def _get_agent_confirmation(self, agent_role, agent_output):
         output_str = json.dumps(agent_output, ensure_ascii=False, indent=2)
-        prompt = prompts.AGENT_CONFIRMATION_PROMPT.format(agent_role=agent_role, agent_output=output_str)
-        confirmation = self._call_api("AI助理", f"为 {agent_role} 的输出生成人性化确认信息", prompt)
-        if confirmation:
-            print(f"\n{confirmation}\n")
+        prompt = prompt_manager.AGENT_CONFIRMATION_PROMPT.format(agent_role=agent_role, agent_output=output_str)
+        confirmation_text = call_gemini(prompt, self.api_key, self.logger, "AI助理", f"为 {agent_role} 的输出生成人性化确认信息")
+        if confirmation_text:
+            print(f"\n{confirmation_text}\n")
 
     def _plan_new_movie_arc(self):
         movie_data = self._call_api_with_schema("电影世界架构师", "选择下一部电影", prompts.MOVIE_SELECTION_PROMPT, schemas.MOVIE_SELECTION_SCHEMA)
@@ -131,18 +138,26 @@ class StoryManager:
         new_profile_paths = self._create_character_profiles(polished_plan.get("character_pool", []))
         return arc, new_profile_paths
 
-    def _generate_chapter(self, gen_prompt_template, prompt_params, agent_name):
-        gen_prompt = gen_prompt_template.format(**prompt_params)
-        polished_content = self._call_api_with_schema(agent_name, f"创作章节初稿: {prompt_params['chapter_subtitle']}", gen_prompt, schemas.CHAPTER_GENERATION_SCHEMA)
+    def _generate_chapter(self, prompt_params, is_first_chapter_ever=False):
+        agent_name = "小说家" if prompt_params.get("is_movie_world", False) else "悬疑小说家"
+        chapter_subtitle = prompt_params.get("chapter_subtitle", "无标题")
+
+        if is_first_chapter_ever:
+            gen_prompt = prompts.FIRST_CHAPTER_PROMPT_TEMPLATE.format(**prompt_params)
+        else:
+            gen_prompt = prompts.GENERATION_PROMPT_TEMPLATE.format(**prompt_params)
+
+        polished_content = self._call_api_with_schema(agent_name, f"创作章节初稿: {chapter_subtitle}", gen_prompt, schemas.CHAPTER_GENERATION_SCHEMA)
         if not polished_content: return None
 
         for i in range(self.config['rewrite_cycles']):
-            feedback_data = self._call_api_with_schema("文学编辑", f"审查章节: {prompt_params['chapter_subtitle']} (第 {i+1} 轮)", prompts.REVIEW_PROMPT_TEMPLATE.format(chapter_text=json.dumps(polished_content, ensure_ascii=False), **prompt_params), schemas.REVIEW_SCHEMA)
+            review_params = {"movie_plan": prompt_params.get("movie_plan", "{}"), "chapter_subtitle": chapter_subtitle, "emotional_anchor": prompt_params.get("emotional_anchor", "未知"), "chapter_text": json.dumps(polished_content, ensure_ascii=False)}
+            feedback_data = self._call_api_with_schema("文学编辑", f"审查章节: {chapter_subtitle} (第 {i+1} 轮)", prompts.REVIEW_PROMPT_TEMPLATE.format(**review_params), schemas.REVIEW_SCHEMA)
             if not feedback_data: continue
             self._get_agent_confirmation("文学编辑", feedback_data)
             
-            rewrite_prompt_params = {**prompt_params, "original_text": json.dumps(polished_content, ensure_ascii=False), "feedback": json.dumps(feedback_data, ensure_ascii=False)}
-            rewritten_content = self._call_api_with_schema(agent_name, f"重写章节: {prompt_params['chapter_subtitle']} (第 {i+1} 轮)", prompts.REWRITE_PROMPT_TEMPLATE.format(**rewrite_prompt_params), schemas.CHAPTER_GENERATION_SCHEMA)
+            rewrite_params = {**prompt_params, "original_text": json.dumps(polished_content, ensure_ascii=False), "feedback": json.dumps(feedback_data, ensure_ascii=False)}
+            rewritten_content = self._call_api_with_schema(agent_name, f"重写章节: {chapter_subtitle} (第 {i+1} 轮)", prompts.REWRITE_PROMPT_TEMPLATE.format(**rewrite_params), schemas.CHAPTER_GENERATION_SCHEMA)
             if not rewritten_content: break
             polished_content = rewritten_content
             
@@ -151,15 +166,10 @@ class StoryManager:
     def _handle_movie_arc_progression(self, summary_json):
         movie_arc = self.arc_state["current_movie_arc"]
         if movie_arc["current_scene_index"] >= movie_arc["total_scenes"] - 1:
-            roadmap_data, minutes_filepath = self.parliament.hold_meeting(self.arc_state, movie_arc)
-            if roadmap_data and minutes_filepath:
-                self.arc_state["parliament_directive"] = roadmap_data
-                self._save_arc_state()
-                self.git.commit_and_push([minutes_filepath, self.config['story_arc_file']], f"Parliament Meeting after '{movie_arc['movie_name']}'")
-            
-            self.arc_state["current_location"] = "real_world"
+            self.arc_state["current_location"] = "awaiting_meeting" # <-- 核心修改
             movie_arc["status"] = "completed"
             self.arc_state["completed_movie_arcs"].append(movie_arc)
+            self.arc_state["last_completed_arc"] = movie_arc # <-- 核心修改
             self.arc_state["current_movie_arc"] = None
             
             tool_data = self._call_api_with_schema("道具设计师", "为主角设计新工具", prompts.TOOL_CREATION_PROMPT.format(movie_name=movie_arc['movie_name']), schemas.TOOL_CREATION_SCHEMA)
@@ -167,39 +177,43 @@ class StoryManager:
                 self.arc_state["protagonist_tools"].append(tool_data)
                 self._get_agent_confirmation("道具设计师", tool_data)
             
-            return None
+            return None # 结束本轮，等待下轮开会
         else:
             movie_arc["current_scene_index"] += 1
             scene_plan = movie_arc["scenes"][movie_arc["current_scene_index"]]
-            is_first = not self.novel_data["chapters"]
             
-            additional_instructions = (prompts.FIRST_CHAPTER_ADDITIONAL_INSTRUCTIONS if is_first else prompts.GENERAL_CHAPTER_ADDITIONAL_INSTRUCTIONS).format(
-                meta_narrative_instruction = movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("content", ""), 
-                movie_name=movie_arc['movie_name']
-            )
+            meta_instruction = movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("content", "无")
+            if scene_plan.get("scene_number") != movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("trigger_scene", -1):
+                 meta_instruction = "无"
 
             params = {
-                "chapter_subtitle": scene_plan["subtitle"], "emotional_anchor": scene_plan.get("emotion_anchor", "未知"),
+                "is_movie_world": True, "chapter_subtitle": scene_plan["subtitle"], "emotional_anchor": scene_plan.get("emotion_anchor", "未知"),
                 "movie_plan": json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False), "summary_text": json.dumps(summary_json, ensure_ascii=False),
                 "character_profiles_text": self._get_character_profiles_text(summary_json), "protagonist_tools": json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
-                "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"]), "additional_instructions": additional_instructions
+                "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"]), "meta_narrative_instruction": meta_instruction,
+                "movie_name": movie_arc['movie_name']
             }
-            return self._generate_chapter(prompts.GENERATION_PROMPT_BASE, params, "小说家")
+            return self._generate_chapter(params, is_first_chapter_ever=False)
     
     def _handle_real_world_arc_progression(self, summary_json):
         rw_arc = self.arc_state["current_real_world_arc"]
-        rw_arc["current_scene_index"] += 1
-        scene_plan = rw_arc["scenes"][rw_arc["current_scene_index"]]
-        
-        params = {
-            "summary_text": json.dumps(summary_json, ensure_ascii=False),
-            "protagonist_tools": json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
-            "chapter_subtitle": scene_plan["subtitle"],
-            "synopsis": scene_plan["synopsis"],
-            "emotion_anchor": scene_plan.get("emotion_anchor", "未知"),
-            "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"])
-        }
-        return self._generate_chapter(prompts.REAL_WORLD_GENERATION_PROMPT, params, "悬疑小说家")
+        if rw_arc and rw_arc["current_scene_index"] >= rw_arc["total_scenes"] - 1:
+            self.arc_state["current_location"] = "awaiting_meeting" # <-- 核心修改
+            rw_arc["status"] = "completed"
+            self.arc_state["last_completed_arc"] = rw_arc # <-- 核心修改
+            self.arc_state["current_real_world_arc"] = None
+            return None # 结束本轮，等待下轮开会
+        else:
+            rw_arc["current_scene_index"] += 1
+            scene_plan = rw_arc["scenes"][rw_arc["current_scene_index"]]
+            
+            params = {
+                "is_movie_world": False, "chapter_subtitle": scene_plan["subtitle"], "emotional_anchor": scene_plan.get("emotion_anchor", "未知"),
+                "movie_plan": "{}", "summary_text": json.dumps(summary_json, ensure_ascii=False),
+                "character_profiles_text": self._get_character_profiles_text(summary_json), "protagonist_tools": json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
+                "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"]), "meta_narrative_instruction": "无"
+            }
+            return self._generate_chapter(params)
 
     def _start_new_movie_arc(self, summary_json, is_first_run=False):
         arc, new_profile_paths = self._plan_new_movie_arc()
@@ -214,18 +228,18 @@ class StoryManager:
         movie_arc["current_scene_index"] += 1
         scene_plan = movie_arc["scenes"][movie_arc["current_scene_index"]]
         
-        additional_instructions = (prompts.FIRST_CHAPTER_ADDITIONAL_INSTRUCTIONS if is_first_run else prompts.GENERAL_CHAPTER_ADDITIONAL_INSTRUCTIONS).format(
-            meta_narrative_instruction = movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("content", ""), 
-            movie_name=movie_arc['movie_name']
-        )
-        
+        meta_instruction = movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("content", "无")
+        if scene_plan.get("scene_number") != movie_arc.get("movie_plan", {}).get("meta_narrative_foreshadowing", {}).get("trigger_scene", -1):
+             meta_instruction = "无"
+
         params = {
-            "chapter_subtitle": scene_plan["subtitle"], "emotional_anchor": scene_plan.get("emotion_anchor", "未知"),
+            "is_movie_world": True, "chapter_subtitle": scene_plan["subtitle"], "emotional_anchor": scene_plan.get("emotion_anchor", "未知"),
             "movie_plan": json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False), "summary_text": json.dumps(summary_json, ensure_ascii=False),
             "character_profiles_text": self._get_character_profiles_text(summary_json, is_first_run), "protagonist_tools": json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
-            "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"]), "additional_instructions": additional_instructions
+            "character_pov": scene_plan.get("pov_character", self.arc_state["protagonist_name"]), "meta_narrative_instruction": meta_instruction,
+            "movie_name": movie_arc['movie_name']
         }
-        return self._generate_chapter(prompts.GENERATION_PROMPT_BASE, params, "小说家")
+        return self._generate_chapter(params, is_first_chapter_ever=is_first_run)
 
     def _decide_and_execute_next_step(self, summary_json):
         completed_movies = [arc['movie_name'] for arc in self.arc_state['completed_movie_arcs']]
@@ -239,6 +253,7 @@ class StoryManager:
             if not arc: return None
             
             self.arc_state["current_real_world_arc"] = arc
+            self.arc_state["current_location"] = "real_world" # <-- 核心修改
             self._save_arc_state()
             self.git.commit_and_push([self.config['story_arc_file']] + new_profile_paths, f"Architect Plan (Real World): {arc['arc_title']}")
             return self._handle_real_world_arc_progression(summary_json)
@@ -274,7 +289,10 @@ class StoryManager:
             if os.path.exists(profile_path):
                 self.logger.log_read("情报分析师", profile_path, f"为章节生成加载角色 {name} 的侧写")
                 with open(profile_path, 'r', encoding='utf-8') as f:
-                    profiles[name] = json.load(f)
+                    try:
+                        profiles[name] = json.load(f)
+                    except json.JSONDecodeError:
+                        self.logger.log_error(f"无法解析角色侧写文件: {profile_path}")
         return json.dumps(profiles, ensure_ascii=False)
 
     def _finalize_chapter(self, chapter_data):
@@ -292,7 +310,11 @@ class StoryManager:
                     profile_path = os.path.join(PROFILES_DIR, f"{convert_name_to_filename(char_name)}_profile.json")
                     existing_profile = {}
                     if os.path.exists(profile_path):
-                        with open(profile_path, "r", encoding="utf-8") as f: existing_profile = json.load(f)
+                        with open(profile_path, "r", encoding="utf-8") as f: 
+                            try:
+                                existing_profile = json.load(f)
+                            except json.JSONDecodeError:
+                                self.logger.log_error(f"无法解析角色侧写文件: {profile_path}")
                     
                     updated_profile = self._call_api_with_schema("心理分析师", f"更新角色 {char_name} 的侧写", prompts.PROFILE_UPDATE_PROMPT.format(character_name=char_name, existing_profile=json.dumps(existing_profile, ensure_ascii=False), new_content=json.dumps(chapter_data, ensure_ascii=False)), schemas.UPDATED_CHARACTER_PROFILE_SCHEMA)
                     if updated_profile:
@@ -300,15 +322,18 @@ class StoryManager:
                         self.logger.log_write("心理分析师", profile_path, f"更新角色 {char_name} 的侧写")
                         updated_profiles_paths.append(profile_path)
 
-        chapter_data["chapter_number"] = len(self.novel_data["chapters"]) + 1
-        chapter_data["timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        self.novel_data["chapters"].append(chapter_data)
+        chapter_number = len(self.novel_data["chapters"]) + 1
+        
+        chapter_meta = {"chapter_number": chapter_number, "title": chapter_data.get("title", "无标题"), "pov_character": chapter_data.get("pov_character", "未知"), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        
+        final_chapter_obj = {"meta": chapter_meta, "content": chapter_data.get("paragraphs", [])}
+        self.novel_data["chapters"].append(final_chapter_obj)
         
         with open(NOVEL_FILE, "w", encoding="utf-8") as f:
             json.dump(self.novel_data, f, ensure_ascii=False, indent=4)
-        self.logger.log_write("小说家", NOVEL_FILE, f"写入第 {chapter_data['chapter_number']} 章")
+        self.logger.log_write("档案员", NOVEL_FILE, f"写入第 {chapter_number} 章")
 
-        full_text = " ".join(p for chap in self.novel_data["chapters"] for p in chap.get("paragraphs",[]))
+        full_text = " ".join(p for chap in self.novel_data["chapters"] for p in chap.get("content",[]))
         summary_json = self._call_api_with_schema("故事分析师", "生成新的全局摘要", prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=full_text[-5000:]), schemas.SUMMARY_SCHEMA)
         if summary_json:
              self.arc_state["real_world_summary"] = summary_json
@@ -316,7 +341,7 @@ class StoryManager:
         
         self._save_arc_state()
         files_to_commit = [NOVEL_FILE, self.config['story_arc_file']] + updated_profiles_paths
-        self.git.commit_and_push(files_to_commit, f"Chapter {chapter_data['chapter_number']}: {chapter_data.get('title', 'Untitled')}")
+        self.git.commit_and_push(files_to_commit, f"Chapter {chapter_number}: {chapter_meta['title']}")
 
     def run_cycle(self):
         if self.git.get_current_branch() != "main":
@@ -331,23 +356,36 @@ class StoryManager:
         
         new_chapter_data = None
         
-        if self.arc_state["current_location"] == "init_world":
-            new_chapter_data = self._start_new_movie_arc(summary_json, is_first_run=True)
-        elif self.arc_state["current_location"] == "movie_world":
-            new_chapter_data = self._handle_movie_arc_progression(summary_json)
-            if not new_chapter_data:
-                 new_chapter_data = self._decide_and_execute_next_step(self.arc_state["real_world_summary"])
-        elif self.arc_state["current_location"] == "real_world":
-            rw_arc = self.arc_state.get("current_real_world_arc")
-            if rw_arc and rw_arc["current_scene_index"] < rw_arc["total_scenes"] - 1:
+        try:
+            # 核心修改：将会议调用提升到 run_cycle 层面
+            if self.arc_state["current_location"] == "awaiting_meeting":
+                print("\n--- [系统] 检测到大章节已完成，即将召开议会 ---")
+                last_arc = self.arc_state.get("last_completed_arc")
+                if last_arc:
+                    roadmap_data, minutes_filepath = self.parliament.hold_meeting(self.arc_state, last_arc)
+                    if roadmap_data and minutes_filepath:
+                        self.arc_state["parliament_directive"] = roadmap_data
+                        self.git.commit_and_push([minutes_filepath, self.config['story_arc_file']], f"Parliament Meeting after '{last_arc.get('movie_name') or last_arc.get('arc_title')}'")
+                
+                # 会议结束后，直接进入决策流程
+                new_chapter_data = self._decide_and_execute_next_step(self.arc_state["real_world_summary"])
+
+            elif self.arc_state["current_location"] == "init_world":
+                new_chapter_data = self._start_new_movie_arc(summary_json, is_first_run=True)
+            elif self.arc_state["current_location"] == "movie_world":
+                new_chapter_data = self._handle_movie_arc_progression(summary_json)
+            elif self.arc_state["current_location"] == "real_world":
                 new_chapter_data = self._handle_real_world_arc_progression(summary_json)
-            else:
-                if rw_arc: self.arc_state["current_real_world_arc"] = None
-                new_chapter_data = self._decide_and_execute_next_step(summary_json)
+
+        except Exception as e:
+            self.logger.log_error(f"run_cycle 发生严重错误: {e}")
+            raise e
 
         if not new_chapter_data:
             print("\n本轮循环为状态转换或规划，未生成最终章节。")
+            self._save_arc_state() # 确保状态转换被保存
             return
             
         self._finalize_chapter(new_chapter_data)
         print("\n本轮循环完成。")
+

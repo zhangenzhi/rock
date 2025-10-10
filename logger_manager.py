@@ -5,8 +5,10 @@ class LoggerManager:
     """负责记录所有Agent对静态资料的读写操作。"""
     def __init__(self, log_dir="output/logs"):
         self.log_dir = log_dir
+        # 核心修复：确保日志目录在初始化时就存在
         os.makedirs(self.log_dir, exist_ok=True)
         
+        # 使用当前日期作为日志文件名
         log_date = datetime.now().strftime("%Y-%m-%d")
         self.log_file = os.path.join(self.log_dir, f"story_generation_{log_date}.log")
 
@@ -19,7 +21,9 @@ class LoggerManager:
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
         except Exception as e:
-            print(f"!!! 写入日志时发生严重错误: {e} !!!")
+            # 如果日志本身写入失败，打印到控制台
+            print(f"CRITICAL: 日志写入失败: {e}")
+            print(f"CRITICAL: 原始日志信息: {log_entry}")
 
     def log_read(self, agent_name, file_path, description=""):
         """记录一个读操作。"""
@@ -34,7 +38,15 @@ class LoggerManager:
         print(f"  [Log] {agent_name} 写入了 {os.path.basename(file_path)}")
 
     def log_api_call(self, agent_name, purpose):
-        """(新增) 记录一次对Gemini API的调用。"""
+        """记录一次API调用。"""
         message = f"API   | Agent: {agent_name:<20} | Purpose: {purpose}"
         self._log(message)
-
+        # 终端同步打印
+        print(f"\n--- [API Call] Agent: {agent_name} | Purpose: {purpose} ---")
+        
+    def log_error(self, message):
+        """记录一个错误信息。"""
+        error_message = f"ERROR | {message}"
+        self._log(error_message)
+        # 终端同步打印
+        print(f"  [Error] {message}")
