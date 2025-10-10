@@ -24,8 +24,24 @@ class StoryManager:
         self.arc_state = None
         self.story_text = ""
 
+    def prepare_for_new_story(self):
+        """清理所有旧的故事文件，为新故事做准备。"""
+        print("\n--- 正在清理环境，准备开始全新故事 ---")
+        output_dir = "output"
+        if os.path.exists(output_dir):
+            try:
+                shutil.rmtree(output_dir)
+                print(f"环境清理完成: 已删除 '{output_dir}' 目录及其所有内容。")
+            except Exception as e:
+                print(f"清理环境时出错: {e}")
+        else:
+            print("环境已是干净状态，无需清理。")
+
     def _load_arc_state(self):
-        """读取或初始化故事世界状态。"""
+        """
+        读取或初始化故事世界状态。
+        初始化时使用 'init_world' 状态。
+        """
         ARC_STATE_FILE = self.config['story_arc_file']
         if os.path.exists(ARC_STATE_FILE):
             self.logger.log_read("StoryManager", ARC_STATE_FILE, "加载故事世界状态")
@@ -34,11 +50,12 @@ class StoryManager:
                 if "completed_movie_arcs" not in state: state["completed_movie_arcs"] = []
                 if "current_real_world_arc" not in state: state["current_real_world_arc"] = None
                 return state
+        # 核心修改：初始化一个全新的故事状态，位置为 init_world
         return {
             "protagonist_name": "江浩",
             "protagonist_tools": [],
-            "current_location": "real_world",
-            "real_world_summary": "江浩，一个中国的待业青年，最近失业在家，对未来感到迷茫。故事从他百无聊赖的生活开始。",
+            "current_location": "init_world",
+            "real_world_summary": "故事的开端。主角江浩是一名中国的普通待业青年。",
             "current_movie_arc": None,
             "completed_movie_arcs": [],
             "current_real_world_arc": None
@@ -225,7 +242,7 @@ class StoryManager:
         return arc, new_profile_paths
 
     # --- 章节生成模块 (已集成热启动) ---
-    def _generate_movie_chapter(self, movie_arc, summary_before):
+    def _generate_movie_chapter(self, movie_arc, summary_before, is_first_chapter_ever=False):
         """生成电影世界中的一个场景章节。"""
         scene_index = movie_arc["current_scene_index"]
         scene_plan = movie_arc["scenes"][scene_index]
@@ -235,7 +252,7 @@ class StoryManager:
         WORK_DIR = f"output/temp/chapter_{len(re.findall(r'# 第', self.story_text)) + 1}"
         os.makedirs(WORK_DIR, exist_ok=True)
         
-        gen_prompt = self._build_generation_prompt(movie_arc, scene_plan, summary_before)
+        gen_prompt = self._build_generation_prompt(movie_arc, scene_plan, summary_before, is_first_chapter_ever)
 
         draft_file = os.path.join(WORK_DIR, "01_draft.txt")
         if os.path.exists(draft_file):
@@ -263,9 +280,10 @@ class StoryManager:
             self._get_agent_confirmation("文学编辑", feedback)
 
             print(f"--- [小说家] 开始第 {cycle_num} / {self.config['rewrite_cycles']} 轮章节重写 ---")
+            all_profiles_text = "无" if is_first_chapter_ever else self._get_character_profiles_text(summary_before)
             rewrite_prompt = prompts.REWRITE_PROMPT_TEMPLATE.format(
                 movie_plan=json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False), summary_text=summary_before,
-                character_profiles_text=self._get_character_profiles_text(summary_before),
+                character_profiles_text=all_profiles_text,
                 protagonist_tools=json.dumps(self.arc_state['protagonist_tools'], ensure_ascii=False),
                 character_pov=scene_plan.get("pov_character", self.arc_state["protagonist_name"]),
                 original_text=polished_content, feedback=feedback, chapter_subtitle=chapter_subtitle, emotional_anchor=emotional_anchor
@@ -280,7 +298,7 @@ class StoryManager:
         print("  - 临时章节文件已清理。")
         return polished_content, scene_plan.get("pov_character", self.arc_state["protagonist_name"]), chapter_subtitle
 
-    def _build_generation_prompt(self, movie_arc, scene_plan, summary_before):
+    def _build_generation_prompt(self, movie_arc, scene_plan, summary_before, is_first_chapter_ever):
         """辅助函数，构建生成章节的Prompt。"""
         movie_plan_str = json.dumps(movie_arc.get('movie_plan', {}), ensure_ascii=False, indent=2)
         meta_foreshadowing = movie_arc.get('movie_plan', {}).get('meta_narrative_foreshadowing', {})
@@ -288,7 +306,7 @@ class StoryManager:
         if scene_plan.get('scene_number') == meta_foreshadowing.get('trigger_scene', -1):
             meta_instruction = f"**演绎元叙事感:** {meta_foreshadowing.get('content', '')}"
 
-        if movie_arc["current_scene_index"] == 0:
+        if is_first_chapter_ever:
             return prompts.FIRST_CHAPTER_PROMPT_TEMPLATE.format(
                 movie_plan=movie_plan_str, movie_name=movie_arc['movie_name'], chapter_subtitle=scene_plan["subtitle"],
                 emotional_anchor=scene_plan.get("emotion_anchor", "未知"), meta_narrative_instruction=meta_instruction
@@ -364,7 +382,7 @@ class StoryManager:
         rw_arc["current_scene_index"] += 1
         return self._generate_real_world_chapter(rw_arc, summary_before)
 
-    def _start_new_movie_arc(self, summary_before):
+    def _start_new_movie_arc(self, summary_before, is_first_run=False):
         """开始一个新的电影世界。"""
         arc, new_profile_paths = self._plan_new_movie_arc()
         if not arc: return None, None, None
@@ -376,8 +394,7 @@ class StoryManager:
         self.git.commit_and_push([self.config['story_arc_file']] + new_profile_paths, f"Architect Plan (Movie): {arc['movie_name']}")
         
         arc["current_scene_index"] += 1
-        first_summary = "无（这是电影世界的第一个场景）"
-        return self._generate_movie_chapter(arc, first_summary)
+        return self._generate_movie_chapter(arc, summary_before, is_first_chapter_ever=is_first_run)
 
     def _decide_and_execute_next_step(self, summary_before):
         """'故事导演'进行决策，并执行下一步动作。"""
@@ -492,8 +509,11 @@ class StoryManager:
             f.write(header + new_content + "\n")
         self.logger.log_write("小说家", NOVEL_FILE, f"写入第 {next_chapter_number} 章")
 
-        with open(NOVEL_FILE, "r", encoding="utf-8") as f: updated_story_text = f.read()
-        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=updated_story_text), self.api_key)
+        # 核心修改：确保 self.story_text 保持最新
+        with open(NOVEL_FILE, "r", encoding="utf-8") as f:
+            self.story_text = f.read()
+        
+        summary_after = call_gemini(prompts.SUMMARY_PROMPT_TEMPLATE.format(story_text=self.story_text), self.api_key)
         if summary_after:
              self.arc_state["real_world_summary"] = summary_after
              self._get_agent_confirmation("故事分析师", f"已生成新的全局摘要，当前核心悬念是：{summary_after.split('。')[0]}。")
@@ -506,7 +526,7 @@ class StoryManager:
         """执行一个完整的创作循环，包含动态决策。"""
         if self.git.get_current_branch() != "main":
             if not self.git.switch_to_branch("main"):
-                print("错误：无法切换到 'main' 分支，中止执行。")
+                print("错误：无法切换到 'main' 分- 支，中止执行。")
                 return
 
         os.makedirs(self.config['character_profiles_directory'], exist_ok=True)
@@ -518,7 +538,12 @@ class StoryManager:
         
         new_content, pov_character_name, chapter_subtitle = None, None, None
 
-        if self.arc_state["current_location"] == "movie_world":
+        # 核心修改：为 init_world 添加专门的处理分支
+        if self.arc_state["current_location"] == "init_world":
+            print("\n--- [系统] 检测到故事初始化状态 'init_world' ---")
+            new_content, pov_character_name, chapter_subtitle = self._start_new_movie_arc(summary_before, is_first_run=True)
+
+        elif self.arc_state["current_location"] == "movie_world":
             new_content, pov_character_name, chapter_subtitle = self._handle_movie_arc_progression(summary_before)
             if not new_content:
                  new_content, pov_character_name, chapter_subtitle = self._decide_and_execute_next_step(self.arc_state["real_world_summary"])
@@ -538,4 +563,5 @@ class StoryManager:
         print("\n--- 章节生成完毕 ---")
         self._finalize_chapter(new_content, pov_character_name, chapter_subtitle)
         print("\n本轮循环完成。")
+
 
