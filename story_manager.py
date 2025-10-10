@@ -351,4 +351,3 @@ class StoryManager:
             
         self._finalize_chapter(new_chapter_data)
         print("\n本轮循环完成。")
-
