@@ -4,12 +4,8 @@ from datetime import datetime
 class LoggerManager:
     """负责记录所有Agent对静态资料的读写操作。"""
     def __init__(self, log_dir="output/logs"):
-        """
-        初始化日志管理器，创建日志目录和当天的日志文件。
-        """
         self.log_dir = log_dir
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
+        os.makedirs(self.log_dir, exist_ok=True)
         
         log_date = datetime.now().strftime("%Y-%m-%d")
         self.log_file = os.path.join(self.log_dir, f"story_generation_{log_date}.log")
@@ -23,13 +19,12 @@ class LoggerManager:
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
         except Exception as e:
-            print(f"写入日志失败: {e}")
+            print(f"!!! 写入日志时发生严重错误: {e} !!!")
 
     def log_read(self, agent_name, file_path, description=""):
         """记录一个读操作。"""
         message = f"READ  | Agent: {agent_name:<20} | File: {file_path:<50} | Desc: {description}"
         self._log(message)
-        # 为了保持控制台清晰，日志记录操作本身不再重复打印到控制台
         print(f"  [Log] {agent_name} 读取了 {os.path.basename(file_path)}")
 
     def log_write(self, agent_name, file_path, description=""):
@@ -37,3 +32,9 @@ class LoggerManager:
         message = f"WRITE | Agent: {agent_name:<20} | File: {file_path:<50} | Desc: {description}"
         self._log(message)
         print(f"  [Log] {agent_name} 写入了 {os.path.basename(file_path)}")
+
+    def log_api_call(self, agent_name, purpose):
+        """(新增) 记录一次对Gemini API的调用。"""
+        message = f"API   | Agent: {agent_name:<20} | Purpose: {purpose}"
+        self._log(message)
+

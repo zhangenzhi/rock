@@ -1,9 +1,16 @@
 import requests
 import json
 
-def call_gemini(prompt, api_key):
-    """调用 Gemini API 并获取生成的内容。"""
-    print(f"\n--- 正在调用 Gemini 模型: gemini-2.5-flash-preview-05-20 ---")
+def call_gemini(prompt, api_key, logger, agent_name, purpose):
+    """
+    (已升级) 调用 Gemini API 并获取生成的内容。
+    现在会记录调用者(Agent)和其目的。
+    """
+    # --- 核心修改：在终端打印并写入日志 ---
+    print(f"\n--- [API Call] Agent: {agent_name} | Purpose: {purpose} ---")
+    if logger:
+        logger.log_api_call(agent_name, purpose)
+    # ------------------------------------
     
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
     
@@ -27,7 +34,6 @@ def call_gemini(prompt, api_key):
         
         if "candidates" in response_data and response_data["candidates"]:
             candidate = response_data["candidates"][0]
-            # 检查是否有安全问题导致内容被阻止
             if candidate.get('finishReason') == 'SAFETY':
                 print("错误：内容因安全设置被 Gemini API 阻止。")
                 if 'safetyRatings' in candidate:
@@ -41,7 +47,7 @@ def call_gemini(prompt, api_key):
 
     except requests.exceptions.RequestException as e:
         print(f"错误：Gemini API 请求失败: {e}")
-        if e.response: 
+        if hasattr(e, 'response') and e.response:
             print(f"响应状态码: {e.response.status_code}")
             print(f"响应内容: {e.response.text}")
         return None
